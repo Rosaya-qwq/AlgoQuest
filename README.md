@@ -4,9 +4,19 @@
 
 ## 作者
 
-<a href="https://github.com/Rosaya-qwq">
-  <img height="160" src="https://github-readme-stats.vercel.app/api?username=Rosaya-qwq&show_icons=true&theme=transparent" alt="Rosaya-qwq GitHub stats" />
-</a>
+<table>
+  <tr>
+    <td width="92" align="center">
+      <a href="https://github.com/Rosaya-qwq">
+        <img src="https://github.com/Rosaya-qwq.png?size=160" width="72" height="72" alt="Rosaya-qwq avatar" />
+      </a>
+    </td>
+    <td>
+      <strong>Fish Fin Fan</strong><br />
+      <sub>@Rosaya-qwq</sub>
+    </td>
+  </tr>
+</table>
 
 - GitHub: [Rosaya-qwq](https://github.com/Rosaya-qwq)
 - Email: [fishfinfan@mail.ustc.edu.cn](mailto:fishfinfan@mail.ustc.edu.cn)
