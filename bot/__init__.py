@@ -1,0 +1,1 @@
+"""AlgoQuest QQ bot package."""
