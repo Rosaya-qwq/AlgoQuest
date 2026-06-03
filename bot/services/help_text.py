@@ -14,7 +14,7 @@ DEFAULT_USER_HELP_TEXT = """{app_name}
 
 DEFAULT_ADMIN_HELP_TEXT = """/giveup <cf|at> <难度> - 立即放弃当前题，揭示原题与简要题解，并刷新下一题
 /rank - 查看全体成员排行榜，群管理也可用
-/pass <cf|at> <难度> [uid] - 管理员强制当前题通过并按 /submit 通过计分
+/pass <cf|at> <难度> - 管理员回复用户提交消息，强制当前题通过并按 /submit 通过计分
 /add <uid> - 将用户加入黑名单
 /remove <uid> - 将用户移出黑名单
 /del <uid> - 超级管理员删除某个用户的榜单数据"""

@@ -97,6 +97,9 @@ PROBLEM_FETCH_MAX_ROUNDS = _env_nonnegative_int("PROBLEM_FETCH_MAX_ROUNDS", 0)
 PROBLEM_STARTUP_FETCH_MAX_ROUNDS = _env_nonnegative_int("PROBLEM_STARTUP_FETCH_MAX_ROUNDS", 1)
 PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS = _env_float("PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS", 60.0)
 ATCODER_API_REQUEST_INTERVAL_SECONDS = _env_float("ATCODER_API_REQUEST_INTERVAL_SECONDS", 1.1)
+CODEFORCES_CLOUDSCRAPER_ENABLED = _env_text("CODEFORCES_CLOUDSCRAPER_ENABLED", "true").lower() in {
+    "1", "true", "yes", "enabled",
+}
 MAX_FETCH_ATTEMPTS = 10
 RENDER_VERSION = 17
 ATCODER_REGULAR_CONTEST_RE = re.compile(r"^(?:abc|arc|agc|atc)\d+$", re.IGNORECASE)
@@ -1161,10 +1164,47 @@ async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) ->
             return response.text
         except Exception as exc:  # noqa: BLE001 - try contest URL fallback.
             last_error = exc
+    if CODEFORCES_CLOUDSCRAPER_ENABLED:
+        for url in attempted_urls:
+            try:
+                html = await _fetch_problem_html_with_cloudscraper(url)
+                if "problem-statement" not in html:
+                    raise RuntimeError(f"cloudscraper 页面中没有 problem-statement：{url}")
+                return html
+            except Exception as exc:  # noqa: BLE001 - best-effort Cloudflare fallback.
+                last_error = exc
+                logger.warning(f"cloudscraper failed for {url}: {exc}")
     raise RuntimeError(
         "无法获取题面 HTML；可能是 Codeforces Cloudflare challenge、镜像站 503，"
         f"或服务器网络无法访问。已尝试：{', '.join(attempted_urls)}；最后错误：{last_error}"
     ) from last_error
+
+
+async def _fetch_problem_html_with_cloudscraper(url: str) -> str:
+    return await asyncio.to_thread(_fetch_problem_html_with_cloudscraper_sync, url)
+
+
+def _fetch_problem_html_with_cloudscraper_sync(url: str) -> str:
+    try:
+        import cloudscraper
+    except ImportError as exc:
+        raise RuntimeError("未安装 cloudscraper，请重新安装依赖：python -m pip install -e .") from exc
+
+    headers = _request_headers_for_source("cf")
+    scraper = cloudscraper.create_scraper(
+        browser={
+            "browser": "chrome",
+            "platform": "linux",
+            "desktop": True,
+        }
+    )
+    response = scraper.get(
+        url,
+        headers=headers,
+        timeout=HTTP_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return response.text
 
 
 def _extract_tutorial_url(raw_html: str, problem_url: str) -> str:

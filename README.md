@@ -30,7 +30,7 @@
 - `/del <uid>`：超级管理员删除某个用户在榜单中的所有数据。
 - `/cur <cf|at> <难度>`：重新发送当前难度的题面图片，避免题面被聊天记录刷走。
 - `/submit <cf|at> <难度> <题解描述>`：提交当前难度题目的题解描述，由 DeepSeek 进行思路评审，并更新本地 rating 与难度计数。
-- `/pass <cf|at> <难度> [uid]`：管理员或群管理强制通过当前题，一血已产生时无效；普通用户不能使用。
+- `/pass <cf|at> <难度>`：管理员或群管理回复用户提交消息，强制通过当前题；不能手动输入 uid，一血已产生时无效。
 - `/rank`：管理员和群管理查看全体成功解题用户排行榜；普通用户只能查看自己的排名卡片。图片包含头像、用户名、uid、CF/AT rating 和五档难度通过数。
 
 ## DeepSeek AI 评审 / 中文翻译 / LaTeX 公式渲染 启用说明
@@ -85,7 +85,7 @@ AT_RATING_IMPOSSIBLE=3000,inf
 NICKNAME=["AlgoQuest","算法练习"]
 ALGOQUEST_DISPLAY_NAME=AlgoQuest
 ALGOQUEST_USER_HELP_TEXT="{app_name}\n/ping - 检查机器人是否在线\n/cur <cf|at> <难度> - 重新发送当前题面\n/submit <cf|at> <难度> <题解描述> - 提交题解描述并由 AI 评审\n/giveup <cf|at> <难度> - 投票放弃当前题，两名群成员同意后刷新\n/rank - 查看自己的解题排行榜卡片\n/help - 查看当前指令"
-ALGOQUEST_ADMIN_HELP_TEXT="/giveup <cf|at> <难度> - 立即放弃当前题，揭示原题与简要题解，并刷新下一题\n/rank - 查看全体成员排行榜，群管理也可用\n/pass <cf|at> <难度> [uid] - 管理员强制当前题通过并按 /submit 通过计分\n/add <uid> - 将用户加入黑名单\n/remove <uid> - 将用户移出黑名单\n/del <uid> - 超级管理员删除某个用户的榜单数据"
+ALGOQUEST_ADMIN_HELP_TEXT="/giveup <cf|at> <难度> - 立即放弃当前题，揭示原题与简要题解，并刷新下一题\n/rank - 查看全体成员排行榜，群管理也可用\n/pass <cf|at> <难度> - 管理员回复用户提交消息，强制当前题通过并按 /submit 通过计分\n/add <uid> - 将用户加入黑名单\n/remove <uid> - 将用户移出黑名单\n/del <uid> - 超级管理员删除某个用户的榜单数据"
 ALGOQUEST_RANKLIST_TITLE="{app_name} Ranklist"
 ALGOQUEST_RANKLIST_SUBTITLE="Ranked by solved count: IMP/H/M/E/CI."
 ALGOQUEST_RANKLIST_FOOTER="Same solved vector shares rank; rating is shown as reference only."
@@ -188,11 +188,13 @@ PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS=60
 ATCODER_API_REQUEST_INTERVAL_SECONDS=1.1
 CODEFORCES_PROBLEM_PAGE_BASES=https://codeforces.com/problemset/problem,https://mirror.codeforces.com/problemset/problem
 CODEFORCES_CONTEST_PAGE_BASES=https://codeforces.com/contest,https://mirror.codeforces.com/contest
+CODEFORCES_CLOUDSCRAPER_ENABLED=true
 ```
 
 - `PROBLEM_FETCH_MAX_ROUNDS=0` 表示题面抓取/渲染失败后持续重试，直到抓到可用题目。
 - `PROBLEM_STARTUP_FETCH_MAX_ROUNDS=1` 表示启动时每档最多试一轮，避免 CF 主站/镜像不可用时卡住启动；启动后后台维护任务会继续补题。
 - `PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS` 控制后台补题间隔。缺题、图片丢失、题解为空或题解生成失败时，会在空闲时间反复尝试补齐。
+- `CODEFORCES_CLOUDSCRAPER_ENABLED=true` 表示普通 httpx 抓取 CF 题面失败后，再尝试使用 `cloudscraper` 处理 Cloudflare challenge。它不是万能的；如果 CF 的 challenge 需要真实浏览器交互或当前服务器 IP 被强拦，仍然需要代理或可用镜像。
 - `PROBLEMSET_FETCH_RETRY_DELAY_SECONDS` 控制 CF/AT 题库 API 失败后的重试间隔。
 - `ATCODER_API_REQUEST_INTERVAL_SECONDS` 控制连续访问 AtCoder Problems API 的间隔，默认大于 1 秒。
 

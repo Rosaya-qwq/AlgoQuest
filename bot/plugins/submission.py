@@ -16,7 +16,6 @@ from bot.services.problem_random import (
     read_problem_markdown,
     read_problem_tutorial,
 )
-from bot.services.blacklist import normalize_uid
 from bot.services.permissions import get_event_user_id, is_group_admin_or_superuser, is_superuser
 from bot.services.submission import (
     apply_rating_update,
@@ -148,9 +147,13 @@ async def handle_submit(bot: Bot, event: Event, args: Message = CommandArg()) ->
 
 @pass_cmd.handle()
 async def handle_pass(bot: Bot, event: Event, args: Message = CommandArg()) -> None:
-    source, difficulty_key, target_user = parse_submit_args(args.extract_plain_text())
+    source, difficulty_key, extra_arg = parse_submit_args(args.extract_plain_text())
     if source is None or difficulty_key is None:
-        await pass_cmd.finish("用法：回复某条提交相关消息，发送 /pass <cf|at> <难度> [uid]\n\n" + difficulty_usage("/pass"))
+        await pass_cmd.finish("用法：回复用户提交消息，发送 /pass <cf|at> <难度>\n\n" + difficulty_usage("/pass"))
+    if extra_arg.strip():
+        await pass_cmd.finish("用法：回复用户提交消息，发送 /pass <cf|at> <难度>。不能手动输入 uid。")
+    if not _has_reply(event):
+        await pass_cmd.finish("请回复用户提交消息使用 /pass，不能直接输入 uid 通过。")
 
     problem = get_current_problem(difficulty_key, source=source)
     if problem is None:
@@ -161,12 +164,11 @@ async def handle_pass(bot: Bot, event: Event, args: Message = CommandArg()) -> N
 
     snapshot_key = problem_snapshot_key(difficulty_key, problem, source=source)
     if _is_reply_to_bot(bot, event):
-        await pass_cmd.finish("不能回复机器人消息使用 /pass；请回复用户提交消息，或显式写 uid。")
+        await pass_cmd.finish("不能回复机器人消息使用 /pass；请回复用户提交消息。")
 
-    raw_user_id = target_user.strip() or (_extract_reply_user_id(event) or "")
-    user_id = normalize_uid(raw_user_id)
+    user_id = _extract_reply_user_id(event)
     if user_id is None:
-        await pass_cmd.finish("无法识别有效 uid；请回复用户提交消息，或使用 /pass <cf|at> <难度> <uid>。")
+        await pass_cmd.finish("无法识别被回复消息的用户。")
     if user_id == str(bot.self_id):
         await pass_cmd.finish("不能给机器人账号执行 /pass。")
 
@@ -267,6 +269,10 @@ def _extract_reply_user_id(event: Event) -> str | None:
     sender = getattr(message, "sender", None)
     user_id = getattr(sender, "user_id", None)
     return str(user_id) if user_id is not None else None
+
+
+def _has_reply(event: Event) -> bool:
+    return getattr(event, "reply", None) is not None
 
 
 def _is_reply_to_bot(bot: Bot, event: Event) -> bool:

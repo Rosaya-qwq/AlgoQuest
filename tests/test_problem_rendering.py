@@ -730,3 +730,31 @@ def test_ensure_difficulty_buffer_fills_missing_next(monkeypatch, tmp_path: Path
     assert changed
     assert ensured_current.key == current.key
     assert ensured_next.key == "2B"
+
+
+def test_fetch_problem_html_uses_cloudscraper_fallback(monkeypatch) -> None:
+    class FailedResponse:
+        text = ""
+
+        def raise_for_status(self) -> None:
+            raise RuntimeError("403 challenge")
+
+    class FailedClient:
+        async def get(self, *args, **kwargs):
+            return FailedResponse()
+
+    async def fake_cloudscraper(url: str) -> str:
+        assert "codeforces.com" in url
+        return '<div class="problem-statement"><p>ok</p></div>'
+
+    monkeypatch.setattr(problem_random, "CODEFORCES_CLOUDSCRAPER_ENABLED", True)
+    monkeypatch.setattr(problem_random, "_fetch_problem_html_with_cloudscraper", fake_cloudscraper)
+
+    html = asyncio.run(
+        problem_random._fetch_problem_html(
+            FailedClient(),
+            ProblemRef(contest_id=1, index="A", name="A", rating=800, tags=[]),
+        )
+    )
+
+    assert "problem-statement" in html
