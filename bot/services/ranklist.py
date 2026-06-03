@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import unicodedata
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -61,16 +63,11 @@ async def render_ranklist_image(user_names: dict[str, str] | None = None) -> Pat
     draw.rectangle((24, 24, WIDTH - 24, 30), fill=BLUE)
     draw.rectangle((24, 30, WIDTH - 24, 36), fill=AMBER)
 
-    draw.text((MARGIN, 54), _ranklist_title(), font=font_title, fill=TEXT)
-    draw.text(
-        (MARGIN, 101),
-        _ranklist_subtitle(),
-        font=font_subtitle,
-        fill=MUTED,
-    )
+    _draw_text(draw, (MARGIN, 54), _ranklist_title(), font_title, TEXT)
+    _draw_text(draw, (MARGIN, 101), _ranklist_subtitle(), font_subtitle, MUTED)
 
     if not entries:
-        draw.text((MARGIN, 178), _ranklist_empty_text(), font=font_name, fill=MUTED)
+        _draw_text(draw, (MARGIN, 178), _ranklist_empty_text(), font_name, MUTED)
     else:
         y = HEADER_HEIGHT
         for rank, entry in enumerate(entries[:30], start=1):
@@ -87,7 +84,7 @@ async def render_ranklist_image(user_names: dict[str, str] | None = None) -> Pat
             y += ROW_HEIGHT
 
     footer = _ranklist_footer()
-    draw.text((MARGIN, height - 52), footer, font=font_small, fill=MUTED)
+    _draw_text(draw, (MARGIN, height - 52), footer, font_small, MUTED)
 
     RANKLIST_DIR.mkdir(parents=True, exist_ok=True)
     output_path = RANKLIST_DIR / "ranklist.png"
@@ -123,8 +120,8 @@ async def render_user_rank_image(user_id: str, user_names: dict[str, str] | None
         font_title,
         WIDTH - MARGIN * 2,
     )
-    draw.text((MARGIN, 54), title, font=font_title, fill=TEXT)
-    draw.text((MARGIN, 101), _user_rank_subtitle(), font=font_subtitle, fill=MUTED)
+    _draw_text(draw, (MARGIN, 54), title, font_title, TEXT)
+    _draw_text(draw, (MARGIN, 101), _user_rank_subtitle(), font_subtitle, MUTED)
 
     if entries:
         all_entries = _with_display_ranks(get_rank_entries())
@@ -143,11 +140,12 @@ async def render_user_rank_image(user_id: str, user_names: dict[str, str] | None
             fonts=(font_rank, font_name, font_body, font_small, font_badge),
         )
     else:
-        draw.text(
+        _draw_text(
+            draw,
             (MARGIN, 178),
             _user_rank_empty_text(user_names.get(user_id, "用户"), user_id),
-            font=font_name,
-            fill=MUTED,
+            font_name,
+            MUTED,
         )
 
     RANKLIST_DIR.mkdir(parents=True, exist_ok=True)
@@ -213,7 +211,7 @@ def _draw_rank_row(
     rating = float(entry["rating"])
     total_solved = int(entry["total_solved"])
     display_name = _fit_text(draw, user_name, font_name, 260)
-    draw.text((avatar_x + 92, y + 19), display_name, font=font_name, fill=TEXT)
+    _draw_text(draw, (avatar_x + 92, y + 19), display_name, font_name, TEXT)
     draw.text((avatar_x + 92, y + 50), f"uid {user_id}", font=font_small, fill=MUTED)
     ratings = entry.get("ratings") or {}
     cf_rating = float(ratings.get("cf", rating))
@@ -329,13 +327,156 @@ def _fit_text(
     font: ImageFont.FreeTypeFont,
     max_width: int,
 ) -> str:
-    if draw.textlength(text, font=font) <= max_width:
+    if _text_length(draw, text, font) <= max_width:
         return text
     ellipsis = "..."
     result = text
-    while result and draw.textlength(result + ellipsis, font=font) > max_width:
+    while result and _text_length(draw, result + ellipsis, font) > max_width:
         result = result[:-1]
     return (result or text[:1]) + ellipsis
+
+
+def _draw_text(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: tuple[int, int, int],
+) -> None:
+    base_image = getattr(draw, "_image", None)
+    x, y = xy
+    for chunk, chunk_font in _font_chunks(text, font):
+        if len(chunk) == 1 and _is_emoji_like(chunk) and isinstance(base_image, Image.Image):
+            pasted_width = _paste_emoji(base_image, chunk, x, y, font)
+            if pasted_width:
+                x += pasted_width
+                continue
+        draw.text((x, y), chunk, font=chunk_font, fill=fill)
+        x += int(round(draw.textlength(chunk, font=chunk_font)))
+
+
+def _text_length(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> float:
+    return sum(draw.textlength(chunk, font=chunk_font) for chunk, chunk_font in _font_chunks(text, font))
+
+
+def _font_chunks(text: str, font: ImageFont.FreeTypeFont) -> list[tuple[str, ImageFont.FreeTypeFont]]:
+    chunks: list[tuple[str, ImageFont.FreeTypeFont]] = []
+    current_text = ""
+    current_font = font
+    for char in text:
+        char_font = _font_for_char(char, font)
+        if current_text and char_font is not current_font:
+            chunks.append((current_text, current_font))
+            current_text = char
+            current_font = char_font
+        else:
+            current_text += char
+            current_font = char_font
+    if current_text:
+        chunks.append((current_text, current_font))
+    return chunks
+
+
+def _font_for_char(char: str, font: ImageFont.FreeTypeFont) -> ImageFont.FreeTypeFont:
+    if _is_emoji_like(char):
+        fallback = _load_fallback_font(getattr(font, "size", 18))
+        return fallback or font
+    if _font_has_glyph(font, char):
+        return font
+    fallback = _load_fallback_font(getattr(font, "size", 18))
+    if fallback is not None and _font_has_glyph(fallback, char):
+        return fallback
+    return font
+
+
+def _font_has_glyph(font: ImageFont.FreeTypeFont, char: str) -> bool:
+    if char.isspace() or unicodedata.category(char).startswith("C"):
+        return True
+    try:
+        return font.getmask(char).getbbox() is not None
+    except Exception:
+        return False
+
+
+def _is_emoji_like(char: str) -> bool:
+    if not char:
+        return False
+    codepoint = ord(char)
+    if 0x1F000 <= codepoint <= 0x1FAFF:
+        return True
+    if 0x2600 <= codepoint <= 0x27BF:
+        return True
+    return "EMOJI" in unicodedata.name(char, "")
+
+
+def _paste_emoji(
+    base_image: Image.Image,
+    char: str,
+    x: int,
+    y: int,
+    font: ImageFont.FreeTypeFont,
+) -> int:
+    emoji_font = _load_color_emoji_font()
+    if emoji_font is None:
+        return 0
+
+    bbox = emoji_font.getbbox(char)
+    width = max(1, bbox[2] - bbox[0])
+    height = max(1, bbox[3] - bbox[1])
+    canvas = Image.new("RGBA", (width + 8, height + 8), (255, 255, 255, 0))
+    canvas_draw = ImageDraw.Draw(canvas)
+    canvas_draw.text((4 - bbox[0], 4 - bbox[1]), char, font=emoji_font, embedded_color=True)
+
+    font_bbox = font.getbbox("Hg")
+    target_height = max(14, int((font_bbox[3] - font_bbox[1]) * 1.08))
+    ratio = target_height / canvas.height
+    target_width = max(1, int(canvas.width * ratio))
+    resized = canvas.resize((target_width, target_height), Image.LANCZOS)
+    baseline_offset = max(0, int((font_bbox[3] - font_bbox[1] - target_height) / 2))
+    paste_y = y + baseline_offset + 1
+    base_image.paste(resized, (int(x), int(paste_y)), resized)
+    return target_width + 2
+
+
+@lru_cache(maxsize=1)
+def _load_color_emoji_font() -> ImageFont.FreeTypeFont | None:
+    candidates = [
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf",
+        "/mnt/c/Windows/Fonts/seguiemj.ttf",
+    ]
+    for candidate in candidates:
+        path = Path(candidate)
+        if not path.exists():
+            continue
+        for size in (109, 128, 136, 160):
+            try:
+                return ImageFont.truetype(str(path), size=size, encoding="utf-8")
+            except OSError:
+                continue
+    return None
+
+
+@lru_cache(maxsize=32)
+def _load_fallback_font(size: int) -> ImageFont.FreeTypeFont | None:
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf",
+        "/mnt/c/Windows/Fonts/seguiemj.ttf",
+        "/mnt/c/Windows/Fonts/seguisym.ttf",
+    ]
+    for candidate in candidates:
+        path = Path(candidate)
+        if not path.exists():
+            continue
+        try:
+            return ImageFont.truetype(str(path), size=size, encoding="utf-8")
+        except OSError:
+            continue
+    return None
 
 
 def _load_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:

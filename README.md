@@ -324,20 +324,20 @@ sudo -u user /opt/AlgoQuest/.venv/bin/python -m playwright install chromium
 
 #### 2.4 中文字体安装
 
-推荐安装 Noto CJK 字体。它能保证题面、榜单、用户名里的中文正常显示，避免服务器上出现乱码或方块字。
+推荐安装 Noto CJK 字体和 emoji 字体。它能保证题面、榜单、用户名里的中文和表情符号正常显示，避免服务器上出现乱码或方块字。
 
 Ubuntu / Debian：
 
 ```bash
 sudo apt update
-sudo apt install -y fonts-noto-cjk fonts-noto-cjk-extra fonts-dejavu fontconfig
+sudo apt install -y fonts-noto-cjk fonts-noto-cjk-extra fonts-noto-color-emoji fonts-dejavu fontconfig
 sudo fc-cache -fv
 ```
 
 RHEL / CentOS / Fedora：
 
 ```bash
-sudo dnf install -y google-noto-sans-cjk-fonts dejavu-sans-fonts dejavu-sans-mono-fonts fontconfig
+sudo dnf install -y google-noto-sans-cjk-fonts google-noto-emoji-color-fonts dejavu-sans-fonts dejavu-sans-mono-fonts fontconfig
 sudo fc-cache -fv
 ```
 
@@ -345,6 +345,7 @@ sudo fc-cache -fv
 
 ```bash
 fc-match "Noto Sans CJK SC"
+fc-match "Noto Color Emoji"
 fc-list :lang=zh | head
 ```
 
