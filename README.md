@@ -202,7 +202,7 @@ CODEFORCES_CLOUDSCRAPER_ENABLED=true
 
 如果服务器抓 CF 题面时日志里出现 `Cloudflare challenge`、`403`、`503`，通常不是 bot 渲染坏了，而是服务器访问 CF 主站或镜像站被拦。可以让 bot 带上你登录后的 Cookie 去访问主站。
 
-最简单流程：
+方式一：导出 `cookies.txt`
 
 1. 在浏览器里登录 Codeforces 和 AtCoder。
 2. 安装浏览器扩展 `Get cookies.txt LOCALLY` 或类似 Cookie 导出工具。
@@ -224,20 +224,30 @@ CODEFORCES_USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML,
 ATCODER_USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
 ```
 
-也可以不写文件，直接把 Cookie 字符串写进 `.env`：
+方式二：Edge 不装插件，直接复制 Cookie 请求头
+
+1. 用 Edge 登录 `https://codeforces.com`。
+2. 按 `F12` 打开开发者工具，点 `网络` / `Network`。
+3. 刷新页面。
+4. 在请求列表里点第一条 `codeforces.com` 的文档请求。
+5. 右侧点 `标头` / `Headers`。
+6. 找到 `请求标头` / `Request Headers` 里的 `Cookie`。
+7. 复制 `Cookie:` 后面的整行内容，填入 `.env`：
 
 ```env
 CODEFORCES_COOKIE=JSESSIONID=xxx; 39ce7=xxx; cf_clearance=xxx
 ATCODER_COOKIE=REVEL_SESSION=xxx
 ```
 
-6. 重启 bot：
+AtCoder 同理，打开 `https://atcoder.jp` 后复制请求里的 `Cookie`，填到 `ATCODER_COOKIE`。
+
+重启 bot：
 
 ```bash
 sudo systemctl restart algorithmic-bot.service
 ```
 
-7. 验证 Cookie 是否有效：
+验证 Cookie 是否有效：
 
 ```bash
 curl -I -L \

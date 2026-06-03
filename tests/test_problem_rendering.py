@@ -743,12 +743,12 @@ def test_fetch_problem_html_uses_cloudscraper_fallback(monkeypatch) -> None:
         async def get(self, *args, **kwargs):
             return FailedResponse()
 
-    async def fake_cloudscraper(url: str) -> str:
+    async def fake_cloudscraper(url: str, *, timeout: float) -> str:
         assert "codeforces.com" in url
         return '<div class="problem-statement"><p>ok</p></div>'
 
     monkeypatch.setattr(problem_random, "CODEFORCES_CLOUDSCRAPER_ENABLED", True)
-    monkeypatch.setattr(problem_random, "_fetch_problem_html_with_cloudscraper", fake_cloudscraper)
+    monkeypatch.setattr(problem_random, "_fetch_with_cloudscraper", fake_cloudscraper)
 
     html = asyncio.run(
         problem_random._fetch_problem_html(
@@ -758,3 +758,33 @@ def test_fetch_problem_html_uses_cloudscraper_fallback(monkeypatch) -> None:
     )
 
     assert "problem-statement" in html
+
+
+def test_fetch_tutorial_text_uses_cloudscraper_fallback(monkeypatch) -> None:
+    class FailedResponse:
+        text = ""
+
+        def raise_for_status(self) -> None:
+            raise RuntimeError("403 challenge")
+
+    class FailedClient:
+        async def get(self, *args, **kwargs):
+            return FailedResponse()
+
+    async def fake_cloudscraper(url: str, *, timeout: float) -> str:
+        assert "codeforces.com/blog/entry" in url
+        return '<div class="ttypography">A. Demo Tutorial<br>Use dynamic programming.</div>'
+
+    monkeypatch.setattr(problem_random, "CODEFORCES_CLOUDSCRAPER_ENABLED", True)
+    monkeypatch.setattr(problem_random, "TUTORIAL_FETCH_ATTEMPTS", 1)
+    monkeypatch.setattr(problem_random, "_fetch_with_cloudscraper", fake_cloudscraper)
+
+    text = asyncio.run(
+        problem_random._fetch_tutorial_text(
+            FailedClient(),
+            "https://codeforces.com/blog/entry/1",
+            ProblemRef(contest_id=1, index="A", name="Demo", rating=800, tags=[]),
+        )
+    )
+
+    assert "Use dynamic programming." in text

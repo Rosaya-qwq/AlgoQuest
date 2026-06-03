@@ -1167,7 +1167,7 @@ async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) ->
     if CODEFORCES_CLOUDSCRAPER_ENABLED:
         for url in attempted_urls:
             try:
-                html = await _fetch_problem_html_with_cloudscraper(url)
+                html = await _fetch_with_cloudscraper(url, timeout=HTTP_TIMEOUT_SECONDS)
                 if "problem-statement" not in html:
                     raise RuntimeError(f"cloudscraper 页面中没有 problem-statement：{url}")
                 return html
@@ -1181,10 +1181,18 @@ async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) ->
 
 
 async def _fetch_problem_html_with_cloudscraper(url: str) -> str:
-    return await asyncio.to_thread(_fetch_problem_html_with_cloudscraper_sync, url)
+    return await _fetch_with_cloudscraper(url, timeout=HTTP_TIMEOUT_SECONDS)
+
+
+async def _fetch_with_cloudscraper(url: str, *, timeout: float) -> str:
+    return await asyncio.to_thread(_fetch_with_cloudscraper_sync, url, timeout)
 
 
 def _fetch_problem_html_with_cloudscraper_sync(url: str) -> str:
+    return _fetch_with_cloudscraper_sync(url, HTTP_TIMEOUT_SECONDS)
+
+
+def _fetch_with_cloudscraper_sync(url: str, timeout: float) -> str:
     try:
         import cloudscraper
     except ImportError as exc:
@@ -1201,7 +1209,7 @@ def _fetch_problem_html_with_cloudscraper_sync(url: str) -> str:
     response = scraper.get(
         url,
         headers=headers,
-        timeout=HTTP_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
     response.raise_for_status()
     return response.text
@@ -1240,10 +1248,12 @@ async def _fetch_tutorial_text(
     problem: ProblemRef,
 ) -> str:
     last_error: Exception | None = None
+    html = ""
     for attempt in range(1, TUTORIAL_FETCH_ATTEMPTS + 1):
         try:
             response = await client.get(tutorial_url, timeout=TUTORIAL_TIMEOUT_SECONDS)
             response.raise_for_status()
+            html = response.text
             break
         except Exception as exc:  # noqa: BLE001 - best-effort official tutorial fetch.
             last_error = exc
@@ -1255,10 +1265,17 @@ async def _fetch_tutorial_text(
             if attempt < TUTORIAL_FETCH_ATTEMPTS:
                 await asyncio.sleep(1.5 * attempt)
     else:
-        logger.warning(f"Giving up Codeforces tutorial fetch: {tutorial_url} ({last_error})")
-        return ""
+        if CODEFORCES_CLOUDSCRAPER_ENABLED:
+            try:
+                html = await _fetch_with_cloudscraper(tutorial_url, timeout=TUTORIAL_TIMEOUT_SECONDS)
+            except Exception as exc:  # noqa: BLE001 - tutorial is best effort.
+                last_error = exc
+                logger.warning(f"cloudscraper failed for Codeforces tutorial: {tutorial_url} ({exc})")
+        if not html:
+            logger.warning(f"Giving up Codeforces tutorial fetch: {tutorial_url} ({last_error})")
+            return ""
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     nodes = soup.select(".ttypography")
     if not nodes:
         nodes = soup.select(".blog-entry-content, .content")
