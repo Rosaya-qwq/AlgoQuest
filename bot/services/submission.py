@@ -30,6 +30,9 @@ MIN_RATING = 0.0
 MAX_DELTA = 800.0
 MAX_OVER_TARGET_GAIN = 5.0
 DEFAULT_SUBMISSION_MODEL = "deepseek-v4-flash"
+MAX_REVIEW_STATEMENT_CHARS = 24000
+MAX_REVIEW_TUTORIAL_CHARS = 24000
+MAX_REVIEW_SUBMISSION_CHARS = 12000
 
 DIFFICULTY_WEIGHT: dict[str, float] = {
     "check-in": 0.65,
@@ -598,17 +601,17 @@ def _build_review_prompt(
             "problem_id": problem.key,
             "rating": problem.rating,
             "tags": problem.tags,
-            "statement": problem_statement[:12000],
+            "statement": problem_statement[:MAX_REVIEW_STATEMENT_CHARS],
         },
         "tutorial": {
             "url": tutorial_url or problem.tutorial_url,
-            "content": tutorial_text[:14000],
+            "content": tutorial_text[:MAX_REVIEW_TUTORIAL_CHARS],
             "policy": (
                 "可选官方题解参考。若 submission 与此摘录的题解主线基本一致，"
                 "应提高置信度并倾向通过；但输出中不能泄露正确做法、核心结论或修正路线。"
             ),
         },
-        "submission": user_solution[:6000],
+        "submission": user_solution[:MAX_REVIEW_SUBMISSION_CHARS],
         "history": [],
         "history_policy": "必须忽略历史上下文；只评审 submission 字段中的本次提交；所有回答字段必须使用简体中文。",
         "output_schema": {
@@ -669,14 +672,20 @@ def _parse_review_payload(payload: dict[str, Any]) -> SubmissionReview:
     verdict = str(payload.get("verdict", "UNCERTAIN")).upper()
     if verdict not in {"ACCEPTED", "WRONG_ANSWER", "INCOMPLETE", "UNCERTAIN"}:
         verdict = "UNCERTAIN"
+    score = _clamp(_as_float(payload.get("score"), 0.0), 0.0, 1.0)
+    confidence = _clamp(_as_float(payload.get("confidence"), 0.0), 0.0, 1.0)
+    if verdict == "ACCEPTED" and score < 0.6:
+        verdict = "INCOMPLETE"
+    elif verdict != "ACCEPTED" and score >= 0.82 and confidence >= 0.65:
+        verdict = "ACCEPTED"
 
     extra_tests = payload.get("extra_tests")
     issues = payload.get("issues")
     suggestions = payload.get("suggestions")
     return SubmissionReview(
         verdict=verdict,
-        score=_clamp(_as_float(payload.get("score"), 0.0), 0.0, 1.0),
-        confidence=_clamp(_as_float(payload.get("confidence"), 0.0), 0.0, 1.0),
+        score=score,
+        confidence=confidence,
         sample_simulation=_as_text(payload.get("sample_simulation"), "未提供样例模拟。"),
         extra_tests=_as_text_list(extra_tests)[:4],
         proof_check=_as_text(payload.get("proof_check"), "未提供证明检查。"),
@@ -827,6 +836,27 @@ def repair_rank_stats() -> bool:
     if changed:
         _save_stats(stats)
     return changed
+
+
+def remove_invalid_rank_users() -> list[str]:
+    """Delete rank records whose user id is not a numeric QQ uid."""
+    if not USER_STATS_PATH.exists():
+        return []
+    stats = _load_stats()
+    users = stats.get("users", {})
+    if not isinstance(users, dict):
+        return []
+    invalid_user_ids = [
+        str(user_id)
+        for user_id in list(users)
+        if not _is_valid_user_id(str(user_id))
+    ]
+    if not invalid_user_ids:
+        return []
+    for user_id in invalid_user_ids:
+        users.pop(user_id, None)
+    _save_stats(stats)
+    return invalid_user_ids
 
 
 def remove_rank_user(user_id: str) -> bool:
@@ -1032,6 +1062,10 @@ def _as_text_list(value: Any) -> list[str]:
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []
+
+
+def _is_valid_user_id(user_id: str) -> bool:
+    return bool(re.fullmatch(r"\d{5,12}", str(user_id).strip()))
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:

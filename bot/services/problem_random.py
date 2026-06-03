@@ -62,6 +62,18 @@ def _env_rating_range(key: str, default_min: int, default_max: int | None) -> tu
     return min_rating, max_rating
 
 
+def _env_csv(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return default
+    values = tuple(part.strip().rstrip("/") for part in raw.split(",") if part.strip())
+    return values or default
+
+
+def _env_text(key: str, default: str = "") -> str:
+    return os.environ.get(key, default).strip()
+
+
 CF_DATA_DIR = Path("data/codeforces")
 ATCODER_DATA_DIR = Path("data/atcoder")
 DATA_DIR = CF_DATA_DIR
@@ -75,25 +87,41 @@ ATCODER_STATE_DIR = ATCODER_DATA_DIR / "states"
 ATCODER_RENDERED_DIR = ATCODER_DATA_DIR / "rendered"
 
 PROBLEMSET_CACHE_TTL_SECONDS = 24 * 60 * 60
-HTTP_TIMEOUT_SECONDS = _env_float("CODEFORCES_HTTP_TIMEOUT_SECONDS", 20.0)
-ATCODER_HTTP_TIMEOUT_SECONDS = _env_float("ATCODER_HTTP_TIMEOUT_SECONDS", 20.0)
-TUTORIAL_TIMEOUT_SECONDS = _env_float("TUTORIAL_TIMEOUT_SECONDS", 60.0)
-TUTORIAL_FETCH_ATTEMPTS = _env_int("TUTORIAL_FETCH_ATTEMPTS", 3)
+HTTP_TIMEOUT_SECONDS = _env_float("CODEFORCES_HTTP_TIMEOUT_SECONDS", 60.0)
+ATCODER_HTTP_TIMEOUT_SECONDS = _env_float("ATCODER_HTTP_TIMEOUT_SECONDS", 60.0)
+TUTORIAL_TIMEOUT_SECONDS = _env_float("TUTORIAL_TIMEOUT_SECONDS", 900.0)
+TUTORIAL_FETCH_ATTEMPTS = _env_int("TUTORIAL_FETCH_ATTEMPTS", 5)
 PROBLEM_FETCH_RETRY_DELAY_SECONDS = _env_float("PROBLEM_FETCH_RETRY_DELAY_SECONDS", 5.0)
 PROBLEMSET_FETCH_RETRY_DELAY_SECONDS = _env_float("PROBLEMSET_FETCH_RETRY_DELAY_SECONDS", 10.0)
 PROBLEM_FETCH_MAX_ROUNDS = _env_nonnegative_int("PROBLEM_FETCH_MAX_ROUNDS", 0)
+PROBLEM_STARTUP_FETCH_MAX_ROUNDS = _env_nonnegative_int("PROBLEM_STARTUP_FETCH_MAX_ROUNDS", 1)
+PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS = _env_float("PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS", 60.0)
 ATCODER_API_REQUEST_INTERVAL_SECONDS = _env_float("ATCODER_API_REQUEST_INTERVAL_SECONDS", 1.1)
 MAX_FETCH_ATTEMPTS = 10
-RENDER_VERSION = 16
+RENDER_VERSION = 17
 ATCODER_REGULAR_CONTEST_RE = re.compile(r"^(?:abc|arc|agc|atc)\d+$", re.IGNORECASE)
+DEFAULT_HTTP_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
+CODEFORCES_USER_AGENT = _env_text("CODEFORCES_USER_AGENT", DEFAULT_HTTP_USER_AGENT)
+ATCODER_USER_AGENT = _env_text("ATCODER_USER_AGENT", DEFAULT_HTTP_USER_AGENT)
+CODEFORCES_COOKIE = _env_text("CODEFORCES_COOKIE")
+ATCODER_COOKIE = _env_text("ATCODER_COOKIE")
+CODEFORCES_COOKIES_FILE = _env_text("CODEFORCES_COOKIES_FILE")
+ATCODER_COOKIES_FILE = _env_text("ATCODER_COOKIES_FILE")
 
 CODEFORCES_API_PROBLEMSET = "https://codeforces.com/api/problemset.problems"
 ATCODER_PROBLEMS_API = "https://kenkoooo.com/atcoder/resources/merged-problems.json"
 ATCODER_MODELS_API = "https://kenkoooo.com/atcoder/resources/problem-models.json"
-PROBLEM_PAGE_BASES = (
+PROBLEM_PAGE_BASES = _env_csv("CODEFORCES_PROBLEM_PAGE_BASES", (
     "https://codeforces.com/problemset/problem",
     "https://mirror.codeforces.com/problemset/problem",
-)
+))
+PROBLEM_CONTEST_PAGE_BASES = _env_csv("CODEFORCES_CONTEST_PAGE_BASES", (
+    "https://codeforces.com/contest",
+    "https://mirror.codeforces.com/contest",
+))
 
 
 @dataclass(frozen=True)
@@ -171,6 +199,104 @@ SOURCE_ALIASES: dict[str, str] = {
 
 def _is_regular_atcoder_contest(contest_id: str) -> bool:
     return bool(ATCODER_REGULAR_CONTEST_RE.fullmatch(contest_id.strip()))
+
+
+def _request_headers_for_source(source: str) -> dict[str, str]:
+    if source == "at":
+        user_agent = ATCODER_USER_AGENT
+        cookie = _cookie_header(
+            direct_cookie=ATCODER_COOKIE,
+            cookie_file=ATCODER_COOKIES_FILE,
+            domain_hint="atcoder.jp",
+        )
+    else:
+        user_agent = CODEFORCES_USER_AGENT
+        cookie = _cookie_header(
+            direct_cookie=CODEFORCES_COOKIE,
+            cookie_file=CODEFORCES_COOKIES_FILE,
+            domain_hint="codeforces.com",
+        )
+
+    headers = {"User-Agent": user_agent or DEFAULT_HTTP_USER_AGENT}
+    if cookie:
+        headers["Cookie"] = cookie
+    return headers
+
+
+def _cookie_header(*, direct_cookie: str, cookie_file: str, domain_hint: str) -> str:
+    if direct_cookie:
+        return direct_cookie
+    if not cookie_file:
+        return ""
+    path = Path(os.path.expandvars(cookie_file)).expanduser()
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        logger.warning(f"Configured cookie file is not readable: {path}")
+        return ""
+    if not text:
+        return ""
+    if text.startswith("[") or text.startswith("{"):
+        parsed = _cookie_header_from_json(text, domain_hint)
+    else:
+        parsed = _cookie_header_from_netscape(text, domain_hint)
+    if parsed:
+        return parsed
+    if "\n" not in text and "\t" not in text and "=" in text:
+        return text
+    return ""
+
+
+def _cookie_header_from_json(text: str, domain_hint: str) -> str:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return ""
+    cookies: list[dict[str, Any]]
+    if isinstance(payload, list):
+        cookies = [item for item in payload if isinstance(item, dict)]
+    elif isinstance(payload, dict):
+        raw_cookies = payload.get("cookies")
+        cookies = [item for item in raw_cookies if isinstance(item, dict)] if isinstance(raw_cookies, list) else []
+        if not cookies and "name" in payload and "value" in payload:
+            cookies = [payload]
+    else:
+        return ""
+    pairs: list[str] = []
+    for cookie in cookies:
+        domain = str(cookie.get("domain") or "")
+        if domain and not _cookie_domain_matches(domain, domain_hint):
+            continue
+        name = str(cookie.get("name") or "").strip()
+        value = str(cookie.get("value") or "")
+        if name:
+            pairs.append(f"{name}={value}")
+    return "; ".join(pairs)
+
+
+def _cookie_header_from_netscape(text: str, domain_hint: str) -> str:
+    pairs: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#HttpOnly_"):
+            line = line.removeprefix("#HttpOnly_")
+        elif line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 7:
+            continue
+        domain, _flag, _path, _secure, _expiry, name, value = parts[:7]
+        if not _cookie_domain_matches(domain, domain_hint):
+            continue
+        if name:
+            pairs.append(f"{name}={value}")
+    return "; ".join(pairs)
+
+
+def _cookie_domain_matches(domain: str, domain_hint: str) -> bool:
+    domain = domain.strip().lstrip(".").lower()
+    domain_hint = domain_hint.strip().lstrip(".").lower()
+    return domain == domain_hint or domain.endswith("." + domain_hint)
 
 
 DIFFICULTY_ALIASES: dict[str, str] = {
@@ -263,6 +389,7 @@ _locks: dict[str, asyncio.Lock] = {
     for key in difficulties
 }
 _warm_tasks: dict[str, asyncio.Task[None]] = {}
+_maintenance_task: asyncio.Task[None] | None = None
 
 
 def normalize_difficulty(raw: str) -> str | None:
@@ -383,6 +510,23 @@ def read_problem_tutorial(problem: RenderedProblem) -> str:
     return problem.tutorial_text or ""
 
 
+def start_problem_buffer_maintenance() -> None:
+    """Start a background loop that fills incomplete buffers when the bot is idle."""
+    global _maintenance_task
+    if _maintenance_task is not None and not _maintenance_task.done():
+        return
+    _maintenance_task = asyncio.create_task(_maintain_problem_buffers_forever())
+
+
+async def _maintain_problem_buffers_forever() -> None:
+    while True:
+        try:
+            await ensure_all_difficulties_on_startup(start_maintenance=False)
+        except Exception:
+            logger.exception("Problem buffer maintenance iteration failed")
+        await asyncio.sleep(PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS)
+
+
 async def claim_problem(difficulty_key: str, source: str = "cf") -> RenderedProblem:
     async with _locks[_state_key(source, difficulty_key)]:
         state = _load_state(difficulty_key, source)
@@ -492,7 +636,7 @@ async def refresh_all_difficulties_on_startup() -> dict[str, str]:
     return results
 
 
-async def ensure_all_difficulties_on_startup() -> dict[str, str]:
+async def ensure_all_difficulties_on_startup(*, start_maintenance: bool = True) -> dict[str, str]:
     """Ensure cur_state and next_state exist without replacing valid cached problems."""
     version_status = sync_render_cache_version()
     results: dict[str, str] = {"render_cache": version_status}
@@ -502,7 +646,11 @@ async def ensure_all_difficulties_on_startup() -> dict[str, str]:
             result_key = _state_key(source, difficulty_key)
             started_at = time.monotonic()
             try:
-                current, upcoming, changed = await ensure_difficulty_buffer(difficulty_key, source=source)
+                current, upcoming, changed = await ensure_difficulty_buffer(
+                    difficulty_key,
+                    source=source,
+                    max_rounds=PROBLEM_STARTUP_FETCH_MAX_ROUNDS,
+                )
                 elapsed = time.monotonic() - started_at
                 if changed:
                     results[result_key] = "filled"
@@ -523,12 +671,16 @@ async def ensure_all_difficulties_on_startup() -> dict[str, str]:
                 )
     cleanup_unreferenced_rendered_dirs()
     logger.info(f"Problem startup ensure finished: {results}")
+    if start_maintenance:
+        start_problem_buffer_maintenance()
     return results
 
 
 async def ensure_difficulty_buffer(
     difficulty_key: str,
     source: str = "cf",
+    *,
+    max_rounds: int | None = None,
 ) -> tuple[RenderedProblem, RenderedProblem, bool]:
     """Fill missing current/next slots and keep existing valid rendered problems."""
     async with _locks[_state_key(source, difficulty_key)]:
@@ -538,13 +690,15 @@ async def ensure_difficulty_buffer(
         changed = False
 
         used_keys: set[str] = set()
-        if current is None:
-            current = await _build_random_problem(difficulty_key, source=source)
+        if not _is_complete_rendered_problem(current):
+            _cleanup_rendered_dir(current)
+            current = await _build_random_problem(difficulty_key, source=source, max_rounds=max_rounds)
             changed = True
         used_keys.add(current.key)
 
-        if upcoming is None:
-            upcoming = await _build_random_problem(difficulty_key, used_keys, source=source)
+        if not _is_complete_rendered_problem(upcoming):
+            _cleanup_rendered_dir(upcoming)
+            upcoming = await _build_random_problem(difficulty_key, used_keys, source=source, max_rounds=max_rounds)
             changed = True
 
         if changed:
@@ -594,13 +748,15 @@ async def _ensure_buffered_states(
         upcoming = _read_rendered_problem(state.get("next_state"))
 
         used_keys = set(exclude_keys)
-        if current is None:
+        if not _is_complete_rendered_problem(current):
+            _cleanup_rendered_dir(current)
             current = await _build_random_problem(difficulty_key, used_keys, source=source)
             used_keys.add(current.key)
         else:
             used_keys.add(current.key)
 
-        if upcoming is None:
+        if not _is_complete_rendered_problem(upcoming):
+            _cleanup_rendered_dir(upcoming)
             upcoming = await _build_random_problem(difficulty_key, used_keys, source=source)
 
         state["cur_state"] = asdict(current)
@@ -614,6 +770,8 @@ async def _build_random_problem(
     difficulty_key: str,
     exclude_keys: set[str] | None = None,
     source: str = "cf",
+    *,
+    max_rounds: int | None = None,
 ) -> RenderedProblem:
     exclude_keys = exclude_keys or set()
     difficulty = _get_difficulties(source)[difficulty_key]
@@ -625,7 +783,7 @@ async def _build_random_problem(
     last_error: Exception | None = None
     async with httpx.AsyncClient(
         timeout=HTTP_TIMEOUT_SECONDS,
-        headers={"User-Agent": "AlgoQuest/0.1"},
+        headers=_request_headers_for_source(source),
         follow_redirects=True,
     ) as client:
         round_index = 0
@@ -641,7 +799,8 @@ async def _build_random_problem(
                         f"Failed to fetch/render {source} {difficulty_key} problem "
                         f"{problem.key} on round {round_index}: {exc}"
                     )
-            if PROBLEM_FETCH_MAX_ROUNDS and round_index >= PROBLEM_FETCH_MAX_ROUNDS:
+            effective_max_rounds = PROBLEM_FETCH_MAX_ROUNDS if max_rounds is None else max_rounds
+            if effective_max_rounds and round_index >= effective_max_rounds:
                 break
             logger.warning(
                 f"No {source} {difficulty_key} problem rendered in round {round_index}; "
@@ -707,7 +866,10 @@ async def _load_problem_pool(difficulty: Difficulty, source: str = "cf") -> list
 
 
 async def _fetch_problemset() -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(
+        timeout=HTTP_TIMEOUT_SECONDS,
+        headers=_request_headers_for_source("cf"),
+    ) as client:
         response = await client.get(CODEFORCES_API_PROBLEMSET)
         response.raise_for_status()
         payload = response.json()
@@ -797,7 +959,11 @@ async def _load_atcoder_problem_pool(difficulty: Difficulty) -> list[ProblemRef]
 
 
 async def _fetch_atcoder_problemset() -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=ATCODER_HTTP_TIMEOUT_SECONDS, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=ATCODER_HTTP_TIMEOUT_SECONDS,
+        headers=_request_headers_for_source("at"),
+        follow_redirects=True,
+    ) as client:
         problems_response = await client.get(ATCODER_PROBLEMS_API)
         problems_response.raise_for_status()
         await asyncio.sleep(ATCODER_API_REQUEST_INTERVAL_SECONDS)
@@ -972,8 +1138,10 @@ async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) ->
         return response.text
 
     last_error: Exception | None = None
+    attempted_urls: list[str] = []
     for base in PROBLEM_PAGE_BASES:
         url = f"{base}/{problem.contest_id}/{problem.index}?locale=en"
+        attempted_urls.append(url)
         try:
             response = await client.get(url)
             response.raise_for_status()
@@ -982,7 +1150,21 @@ async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) ->
             return response.text
         except Exception as exc:  # noqa: BLE001 - try mirror fallback.
             last_error = exc
-    raise RuntimeError(f"无法获取题面 HTML：{last_error}") from last_error
+    for base in PROBLEM_CONTEST_PAGE_BASES:
+        url = f"{base}/{problem.contest_id}/problem/{problem.index}?locale=en"
+        attempted_urls.append(url)
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            if "problem-statement" not in response.text:
+                raise RuntimeError(f"页面中没有 problem-statement：{url}")
+            return response.text
+        except Exception as exc:  # noqa: BLE001 - try contest URL fallback.
+            last_error = exc
+    raise RuntimeError(
+        "无法获取题面 HTML；可能是 Codeforces Cloudflare challenge、镜像站 503，"
+        f"或服务器网络无法访问。已尝试：{', '.join(attempted_urls)}；最后错误：{last_error}"
+    ) from last_error
 
 
 def _extract_tutorial_url(raw_html: str, problem_url: str) -> str:
@@ -2738,6 +2920,18 @@ def _read_rendered_problem(raw: Any) -> RenderedProblem | None:
         )
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _is_complete_rendered_problem(problem: RenderedProblem | None) -> bool:
+    if problem is None:
+        return False
+    if not problem.statement_text.strip():
+        return False
+    if not problem.ai_brief.strip():
+        return False
+    if problem.ai_brief.strip().startswith(("简要题解生成失败", "未配置 DEEPSEEK_API_KEY")):
+        return False
+    return Path(problem.statement_image).exists()
 
 
 def _rendered_files_exist(raw: dict[str, Any]) -> bool:

@@ -16,6 +16,7 @@ from bot.services.problem_random import (
     read_problem_markdown,
     read_problem_tutorial,
 )
+from bot.services.blacklist import normalize_uid
 from bot.services.permissions import get_event_user_id, is_group_admin_or_superuser, is_superuser
 from bot.services.submission import (
     apply_rating_update,
@@ -155,17 +156,17 @@ async def handle_pass(bot: Bot, event: Event, args: Message = CommandArg()) -> N
     if problem is None:
         await pass_cmd.finish(f"当前没有 {source} {difficulty_key} 题目缓存。")
 
-    operator_ok = await _can_force_pass(bot, event, problem, difficulty_key)
-    if not operator_ok:
-        await pass_cmd.finish("只有管理员，或 rating 高于本题所属难度上界的人，可以 /pass。")
+    if not await is_group_admin_or_superuser(bot, event):
+        await pass_cmd.finish("只有管理员可以 /pass。")
 
     snapshot_key = problem_snapshot_key(difficulty_key, problem, source=source)
     if _is_reply_to_bot(bot, event):
         await pass_cmd.finish("不能回复机器人消息使用 /pass；请回复用户提交消息，或显式写 uid。")
 
-    user_id = target_user.strip() or _extract_reply_user_id(event)
+    raw_user_id = target_user.strip() or (_extract_reply_user_id(event) or "")
+    user_id = normalize_uid(raw_user_id)
     if user_id is None:
-        await pass_cmd.finish("无法识别需要强制通过的用户；请回复用户提交消息，或使用 /pass <cf|at> <难度> <uid>。")
+        await pass_cmd.finish("无法识别有效 uid；请回复用户提交消息，或使用 /pass <cf|at> <难度> <uid>。")
     if user_id == str(bot.self_id):
         await pass_cmd.finish("不能给机器人账号执行 /pass。")
 
@@ -259,23 +260,6 @@ def _forced_accept_review():
         suggestions=[],
         summary="管理员强制通过。",
     )
-
-
-async def _can_force_pass(bot: Bot, event: Event, problem, difficulty_key: str) -> bool:
-    if await is_group_admin_or_superuser(bot, event):
-        return True
-    user_id = get_event_user_id(event)
-    if user_id is None:
-        return False
-    from bot.services.submission import get_rank_entry_for_user
-
-    entry = get_rank_entry_for_user(user_id)
-    if entry is None:
-        return False
-    rating = float((entry.get("ratings") or {}).get(problem.source, entry.get("rating", 0.0)))
-    difficulty = DIFFICULTIES_BY_SOURCE[problem.source][difficulty_key]
-    threshold = difficulty.max_rating if difficulty.max_rating is not None else difficulty.min_rating
-    return rating > threshold
 
 
 def _extract_reply_user_id(event: Event) -> str | None:

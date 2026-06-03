@@ -343,6 +343,22 @@ def test_remove_rank_user_deletes_bot_pollution(monkeypatch, tmp_path: Path) -> 
     assert set(submission._load_stats()["users"]) == {"user"}
 
 
+def test_remove_invalid_rank_users_deletes_non_numeric_uid(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(submission, "USER_STATS_PATH", tmp_path / "users.json")
+    submission._save_stats(
+        {
+            "users": {
+                "12345": {"total_solved": 1, "difficulty_solved_counts": {"easy": 1}},
+                "蓝毛": {"total_solved": 1, "difficulty_solved_counts": {"easy": 1}},
+                "abc123": {"total_solved": 1, "difficulty_solved_counts": {"easy": 1}},
+            }
+        }
+    )
+
+    assert set(submission.remove_invalid_rank_users()) == {"蓝毛", "abc123"}
+    assert set(submission._load_stats()["users"]) == {"12345"}
+
+
 def test_problem_snapshot_key_distinguishes_same_problem_rerender() -> None:
     first_problem = RenderedProblem(
         contest_id=1,
@@ -658,6 +674,20 @@ def test_extract_json_object_accepts_fenced_and_noisy_response() -> None:
 
     assert fenced["verdict"] == "ACCEPTED"
     assert noisy["verdict"] == "WRONG_ANSWER"
+
+
+def test_parse_review_payload_normalizes_inconsistent_verdict() -> None:
+    low_score_accept = submission._parse_review_payload(
+        {"verdict": "ACCEPTED", "score": 0.4, "confidence": 0.9}
+    )
+    high_score_reject = submission._parse_review_payload(
+        {"verdict": "INCOMPLETE", "score": 0.9, "confidence": 0.8}
+    )
+
+    assert low_score_accept.verdict == "INCOMPLETE"
+    assert not low_score_accept.accepted
+    assert high_score_reject.verdict == "ACCEPTED"
+    assert high_score_reject.accepted
 
 
 def test_submission_system_prompt_requires_simplified_chinese() -> None:

@@ -27,19 +27,20 @@
 - `/help`：查看当前指令和各难度 rating 区间。
 - `/giveup <cf|at> <难度>`：普通群成员两人投票放弃当前题；管理员和群管理可直接放弃。放弃后揭示原题名称、链接、rating 和简要题解，然后刷新下一题。仍兼容 `/random`、`随机题` 别名。
 - `/add <uid>` / `/remove <uid>`：管理员维护黑名单，黑名单用户不能使用机器人指令。
+- `/del <uid>`：超级管理员删除某个用户在榜单中的所有数据。
 - `/cur <cf|at> <难度>`：重新发送当前难度的题面图片，避免题面被聊天记录刷走。
 - `/submit <cf|at> <难度> <题解描述>`：提交当前难度题目的题解描述，由 DeepSeek 进行思路评审，并更新本地 rating 与难度计数。
-- `/pass <cf|at> <难度> [uid]`：管理员、群管理或 rating 高于本题难度上界的用户可强制通过当前题，一血已产生时无效。
+- `/pass <cf|at> <难度> [uid]`：管理员或群管理强制通过当前题，一血已产生时无效；普通用户不能使用。
 - `/rank`：管理员和群管理查看全体成功解题用户排行榜；普通用户只能查看自己的排名卡片。图片包含头像、用户名、uid、CF/AT rating 和五档难度通过数。
 
-## DeepSeek AI 评审 / 混淆 / LaTeX 公式渲染 启用说明
+## DeepSeek AI 评审 / 中文翻译 / LaTeX 公式渲染 启用说明
 
 ### LaTeX 公式渲染
 **始终启用，无需配置。** 每次刷新新题时自动将 Codeforces 题面中的数学公式渲染为精美数学符号。若用户看到的是旧的缓存题目，管理员重新 `/giveup` 或重启触发预热刷新即可。
 
 ### DeepSeek 提交评审
 
-`/submit` 需要配置 `DEEPSEEK_API_KEY`。它不要求启用 `DEEPSEEK_OBFUSCATION`。
+`/submit` 需要配置 `DEEPSEEK_API_KEY`。题面 AI 只做中文翻译，不再做场景混淆。
 
 ```env
 DEEPSEEK_API_KEY=你的API Key
@@ -61,8 +62,9 @@ DEEPSEEK_TRANSLATION_MODEL_EASY=deepseek-v4-flash
 DEEPSEEK_TRANSLATION_MODEL_MEDIUM=deepseek-v4-flash
 DEEPSEEK_TRANSLATION_MODEL_HARD=deepseek-v4-flash
 DEEPSEEK_TRANSLATION_MODEL_IMPOSSIBLE=deepseek-v4-flash
-DEEPSEEK_TIMEOUT_SECONDS=600
-DEEPSEEK_MAX_TOKENS=12000
+DEEPSEEK_TRANSLATION_ENABLED=true
+DEEPSEEK_TIMEOUT_SECONDS=900
+DEEPSEEK_MAX_TOKENS=24000
 CF_RATING_CHECK_IN=0,1200
 CF_RATING_EASY=1200,1800
 CF_RATING_MEDIUM=1800,2400
@@ -83,7 +85,7 @@ AT_RATING_IMPOSSIBLE=3000,inf
 NICKNAME=["AlgoQuest","算法练习"]
 ALGOQUEST_DISPLAY_NAME=AlgoQuest
 ALGOQUEST_USER_HELP_TEXT="{app_name}\n/ping - 检查机器人是否在线\n/cur <cf|at> <难度> - 重新发送当前题面\n/submit <cf|at> <难度> <题解描述> - 提交题解描述并由 AI 评审\n/giveup <cf|at> <难度> - 投票放弃当前题，两名群成员同意后刷新\n/rank - 查看自己的解题排行榜卡片\n/help - 查看当前指令"
-ALGOQUEST_ADMIN_HELP_TEXT="/giveup <cf|at> <难度> - 立即放弃当前题，揭示原题与简要题解，并刷新下一题\n/rank - 查看全体成员排行榜，群管理也可用\n/pass <cf|at> <难度> [uid] - 强制当前题通过并按 /submit 通过计分\n/add <uid> - 将用户加入黑名单\n/remove <uid> - 将用户移出黑名单"
+ALGOQUEST_ADMIN_HELP_TEXT="/giveup <cf|at> <难度> - 立即放弃当前题，揭示原题与简要题解，并刷新下一题\n/rank - 查看全体成员排行榜，群管理也可用\n/pass <cf|at> <难度> [uid] - 管理员强制当前题通过并按 /submit 通过计分\n/add <uid> - 将用户加入黑名单\n/remove <uid> - 将用户移出黑名单\n/del <uid> - 超级管理员删除某个用户的榜单数据"
 ALGOQUEST_RANKLIST_TITLE="{app_name} Ranklist"
 ALGOQUEST_RANKLIST_SUBTITLE="Ranked by solved count: IMP/H/M/E/CI."
 ALGOQUEST_RANKLIST_FOOTER="Same solved vector shares rank; rating is shown as reference only."
@@ -121,23 +123,24 @@ AT_RATING_HARD=2400,3000
 AT_RATING_IMPOSSIBLE=3000,inf
 ```
 
-### DeepSeek 混淆 + 中文翻译
+### DeepSeek 中文翻译
 在 `.env` 中配置以下四项后重启 bot：
 
 ```env
 DEEPSEEK_API_KEY=你的API Key      # 必填
 DEEPSEEK_BASE_URL=https://api.deepseek.com   # 默认值，可改
-DEEPSEEK_TRANSLATION_MODEL=deepseek-v4-flash # 题面混淆 + 中文翻译模型
-DEEPSEEK_OBFUSCATION=true         # 设为 true 启用
+DEEPSEEK_TRANSLATION_MODEL=deepseek-v4-flash # 题面中文翻译模型
+DEEPSEEK_TRANSLATION_ENABLED=true # 设为 true 启用题面中文翻译
 ```
 
-- `DEEPSEEK_OBFUSCATION=false` → 使用英文原始题面（无混淆）
-- `DEEPSEEK_OBFUSCATION=true` → 场景混淆 + 中文翻译 + AI 解析摘要
+- `DEEPSEEK_TRANSLATION_ENABLED=false` → 使用英文原始题面
+- `DEEPSEEK_TRANSLATION_ENABLED=true` → 只把题面翻译成简体中文，不改变题目背景和本意
+- 旧变量 `DEEPSEEK_OBFUSCATION=true` 仍兼容为“启用翻译”，但不会再混淆题面
 - API 调用失败时自动回退为原始题面，不影响 `/giveup` 正常使用
 - 所有 DeepSeek 调用共用一个异步锁；同一时刻只会发送一个翻译、题解或判题请求，适合 2 核 2G 服务器。
 - 默认只有 `impossible` 难度的判题和题解使用 `deepseek-v4-pro`，其他难度和全部翻译使用 `deepseek-v4-flash`。
 
-**首次启用混淆后**，旧缓存题目仍是英文/无混淆的。执行以下命令清除缓存：
+**首次启用翻译后**，旧缓存题目仍是英文的。执行以下命令清除缓存：
 
 ```bash
 rm -rf data/codeforces/rendered/* data/codeforces/states/* data/atcoder/rendered/* data/atcoder/states/*
@@ -175,17 +178,73 @@ AtCoder 随机池只保留常规比赛题目，当前 contest id 需要匹配 `a
 ```env
 CODEFORCES_HTTP_TIMEOUT_SECONDS=60
 ATCODER_HTTP_TIMEOUT_SECONDS=60
-TUTORIAL_TIMEOUT_SECONDS=600
-TUTORIAL_FETCH_ATTEMPTS=3
+TUTORIAL_TIMEOUT_SECONDS=900
+TUTORIAL_FETCH_ATTEMPTS=5
 PROBLEM_FETCH_RETRY_DELAY_SECONDS=5
 PROBLEMSET_FETCH_RETRY_DELAY_SECONDS=10
 PROBLEM_FETCH_MAX_ROUNDS=0
+PROBLEM_STARTUP_FETCH_MAX_ROUNDS=1
+PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS=60
 ATCODER_API_REQUEST_INTERVAL_SECONDS=1.1
+CODEFORCES_PROBLEM_PAGE_BASES=https://codeforces.com/problemset/problem,https://mirror.codeforces.com/problemset/problem
+CODEFORCES_CONTEST_PAGE_BASES=https://codeforces.com/contest,https://mirror.codeforces.com/contest
 ```
 
 - `PROBLEM_FETCH_MAX_ROUNDS=0` 表示题面抓取/渲染失败后持续重试，直到抓到可用题目。
+- `PROBLEM_STARTUP_FETCH_MAX_ROUNDS=1` 表示启动时每档最多试一轮，避免 CF 主站/镜像不可用时卡住启动；启动后后台维护任务会继续补题。
+- `PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS` 控制后台补题间隔。缺题、图片丢失、题解为空或题解生成失败时，会在空闲时间反复尝试补齐。
 - `PROBLEMSET_FETCH_RETRY_DELAY_SECONDS` 控制 CF/AT 题库 API 失败后的重试间隔。
 - `ATCODER_API_REQUEST_INTERVAL_SECONDS` 控制连续访问 AtCoder Problems API 的间隔，默认大于 1 秒。
+
+### CF / AtCoder 登录 Cookie 详细说明
+
+如果服务器抓 CF 题面时日志里出现 `Cloudflare challenge`、`403`、`503`，通常不是 bot 渲染坏了，而是服务器访问 CF 主站或镜像站被拦。可以让 bot 带上你登录后的 Cookie 去访问主站。
+
+最简单流程：
+
+1. 在浏览器里登录 Codeforces 和 AtCoder。
+2. 安装浏览器扩展 `Get cookies.txt LOCALLY` 或类似 Cookie 导出工具。
+3. 分别打开 `https://codeforces.com` 和 `https://atcoder.jp`，导出 Netscape 格式的 `cookies.txt`。
+4. 上传到服务器，例如：
+
+```bash
+mkdir -p /home/AlgoQuest/secrets
+scp codeforces-cookies.txt root@你的服务器:/home/AlgoQuest/secrets/codeforces-cookies.txt
+scp atcoder-cookies.txt root@你的服务器:/home/AlgoQuest/secrets/atcoder-cookies.txt
+```
+
+5. 在服务器项目目录的 `.env` 里填写：
+
+```env
+CODEFORCES_COOKIES_FILE=/home/AlgoQuest/secrets/codeforces-cookies.txt
+ATCODER_COOKIES_FILE=/home/AlgoQuest/secrets/atcoder-cookies.txt
+CODEFORCES_USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
+ATCODER_USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
+```
+
+也可以不写文件，直接把 Cookie 字符串写进 `.env`：
+
+```env
+CODEFORCES_COOKIE=JSESSIONID=xxx; 39ce7=xxx; cf_clearance=xxx
+ATCODER_COOKIE=REVEL_SESSION=xxx
+```
+
+6. 重启 bot：
+
+```bash
+sudo systemctl restart algorithmic-bot.service
+```
+
+7. 验证 Cookie 是否有效：
+
+```bash
+curl -I -L \
+  -A "$CODEFORCES_USER_AGENT" \
+  -b /home/AlgoQuest/secrets/codeforces-cookies.txt \
+  "https://codeforces.com/problemset/problem/685/E?locale=en"
+```
+
+如果还是 `403` 且响应头里有 `cf-mitigated: challenge`，说明当前服务器 IP 仍被 Cloudflare 拦截。此时仅有登录 Cookie 不够，需要在服务器上配置能访问 CF 的代理，或者换一个可用的 CF 题面镜像，并把镜像填到 `CODEFORCES_PROBLEM_PAGE_BASES` / `CODEFORCES_CONTEST_PAGE_BASES`。
 
 ## 本地运行手册
 

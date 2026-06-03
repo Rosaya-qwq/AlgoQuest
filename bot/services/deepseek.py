@@ -1,4 +1,4 @@
-"""DeepSeek API integration for problem obfuscation and translation."""
+"""DeepSeek API integration for problem translation and solution briefs."""
 
 from __future__ import annotations
 
@@ -23,12 +23,13 @@ DEEPSEEK_BASE_URL = "DEEPSEEK_BASE_URL"
 DEEPSEEK_MODEL = "DEEPSEEK_MODEL"
 DEEPSEEK_TRANSLATION_MODEL = "DEEPSEEK_TRANSLATION_MODEL"
 DEEPSEEK_SOLUTION_MODEL = "DEEPSEEK_SOLUTION_MODEL"
+DEEPSEEK_TRANSLATION_ENABLED = "DEEPSEEK_TRANSLATION_ENABLED"
 DEEPSEEK_OBFUSCATION = "DEEPSEEK_OBFUSCATION"
 DEEPSEEK_TIMEOUT_SECONDS = "DEEPSEEK_TIMEOUT_SECONDS"
 DEEPSEEK_MAX_TOKENS = "DEEPSEEK_MAX_TOKENS"
 
-DEFAULT_TIMEOUT_SECONDS = 600.0
-DEFAULT_MAX_TOKENS = 12000
+DEFAULT_TIMEOUT_SECONDS = 900.0
+DEFAULT_MAX_TOKENS = 24000
 DEFAULT_FLASH_MODEL = "deepseek-v4-flash"
 DEFAULT_PRO_MODEL = "deepseek-v4-pro"
 _DEEPSEEK_API_LOCKS: dict[int, asyncio.Lock] = {}
@@ -90,10 +91,21 @@ def deepseek_model_for(kind: str, difficulty_key: str | None = None, default: st
     return default
 
 
-def is_obfuscation_enabled() -> bool:
-    """Returns True only when the user has explicitly opted in."""
-    val = _config(DEEPSEEK_OBFUSCATION, "false").strip().lower()
+def is_translation_enabled() -> bool:
+    """Return True when statement translation is explicitly enabled.
+
+    ``DEEPSEEK_OBFUSCATION`` is kept as a backward-compatible alias, but the
+    implementation no longer obfuscates story context.
+    """
+    val = _config(DEEPSEEK_TRANSLATION_ENABLED, "").strip().lower()
+    if not val:
+        val = _config(DEEPSEEK_OBFUSCATION, "false").strip().lower()
     return val in ("1", "true", "yes", "enabled")
+
+
+def is_obfuscation_enabled() -> bool:
+    """Backward-compatible alias for the old environment variable."""
+    return is_translation_enabled()
 
 
 def is_configured() -> bool:
@@ -108,17 +120,17 @@ class DeepSeekClient:
         self._api_key = _config(DEEPSEEK_API_KEY)
         self._base_url = _config(DEEPSEEK_BASE_URL, "https://api.deepseek.com").rstrip("/")
         self._model = deepseek_model_for("translation", difficulty_key)
-        self._enabled = is_obfuscation_enabled()
+        self._enabled = is_translation_enabled()
 
     @property
     def enabled(self) -> bool:
         return self._enabled and bool(self._api_key)
 
-    async def obfuscate_statement(self, blocks: list[dict[str, str]]) -> list[dict[str, str]]:
-        """Obfuscate and translate problem statement blocks.
+    async def translate_statement(self, blocks: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Translate problem statement blocks into Simplified Chinese.
 
         Sends the raw text of the blocks to DeepSeek and receives
-        obfuscated + translated markdown, preserving all LaTeX formulas.
+        translated markdown, preserving all LaTeX formulas and structure.
         Returns the original blocks unchanged when disabled or on error.
         """
         if not self.enabled:
@@ -126,12 +138,16 @@ class DeepSeekClient:
 
         raw_text = _blocks_to_text(blocks)
         try:
-            content = await self._chat(_build_obfuscation_prompt(raw_text))
+            content = await self._chat(_build_translation_prompt(raw_text))
             parsed = _parse_markdown_blocks(content)
             return parsed if parsed else blocks
         except Exception:
-            logger.exception("DeepSeek obfuscation failed, falling back to original")
+            logger.exception("DeepSeek translation failed, falling back to original")
             return blocks
+
+    async def obfuscate_statement(self, blocks: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Backward-compatible alias; no obfuscation is performed."""
+        return await self.translate_statement(blocks)
 
     async def generate_brief(self, problem_info: dict[str, Any]) -> str:
         """Generate a 2-3 sentence Chinese summary of the problem.
@@ -220,30 +236,29 @@ async def generate_solution_brief(
 
 
 _SYSTEM_PROMPT = (
-    "You are a competitive programming problem obfuscator and translator. "
-    "You receive a Codeforces problem statement and must:\n"
-    "1. OBFUSCATE: Change the story context (character names, setting, scenario) "
-    "while keeping the algorithmic essence, constraints, input/output format, "
-    "and all numerical values IDENTICAL.\n"
-    "2. TRANSLATE: Output in Simplified Chinese (zh-CN).\n"
-    "3. FIX and PRESERVE LaTeX formulas: Use $...$ for inline math and $$...$$ "
+    "You are a competitive programming problem translator. "
+    "You receive a Codeforces or AtCoder problem statement and must:\n"
+    "1. TRANSLATE only: Output in Simplified Chinese (zh-CN). Do not change the "
+    "story context, variables, constraints, input/output format, examples, or any "
+    "numerical values.\n"
+    "2. FIX and PRESERVE LaTeX formulas: Use $...$ for inline math and $$...$$ "
     "for display math. Fix any malformed LaTeX delimiters (e.g. $$$, extra $, "
     "$$$...$$$, missing delimiters) to the standard form and remove redundant "
     "dollar signs. Do NOT change the mathematical "
     "content of formulas.\n"
-    "4. Use standard markdown formatting: ## for section headings, "
+    "3. Use standard markdown formatting: ## for section headings, "
     "``` for code/IO, paragraphs separated by blank lines. Use **text** "
     "or *text* only for bold emphasis; do not use italic formatting. Never "
     "use _text_ for italic or __text__ for bold; underscores often appear "
     "in variables and code. Use backticks for inline code/literals such as "
     "`1 l r`. Pay special attention to embedded formulas: do not wrap "
     "LaTeX formulas with markdown emphasis markers.\n"
-    "5. Preserve structural markers exactly when they appear: [IMG], "
+    "4. Preserve structural markers exactly when they appear: [IMG], "
     ":::note, and the closing ::: marker. Keep note content inside the note "
     "marker block.\n"
-    "6. Preserve unordered and ordered lists as markdown lists.\n"
-    "7. Do NOT include sample test cases in the output.\n"
-    "Output ONLY the obfuscated markdown, no extra commentary."
+    "5. Preserve unordered and ordered lists as markdown lists.\n"
+    "6. Do NOT include sample test cases in the output.\n"
+    "Output ONLY the translated markdown, no extra commentary."
 )
 
 
@@ -254,11 +269,12 @@ _SOLUTION_BRIEF_SYSTEM_PROMPT = (
 )
 
 
-def _build_obfuscation_prompt(raw_text: str) -> str:
+def _build_translation_prompt(raw_text: str) -> str:
     return (
-        "Obfuscate and translate the following competitive programming problem "
-        "statement. Change the story context but keep the algorithmic essence and "
-        "all LaTeX formulas exactly the same. Output and answer only in Simplified "
+        "Translate the following competitive programming problem statement. "
+        "Do not obfuscate, rewrite, rename story objects, or change the problem "
+        "meaning. Keep all constraints, input/output format, examples, variables, "
+        "and LaTeX formulas exactly the same. Output and answer only in Simplified "
         "Chinese (zh-CN, 简体中文) using standard markdown format (no sample tests). "
         "Do not use italic formatting, do not wrap LaTeX formulas with markdown "
         "emphasis markers, and do not use _text_ for italic or __text__ for bold; "
@@ -266,6 +282,11 @@ def _build_obfuscation_prompt(raw_text: str) -> str:
         "code/literals instead:\n\n"
         + raw_text
     )
+
+
+def _build_obfuscation_prompt(raw_text: str) -> str:
+    """Backward-compatible alias; no obfuscation is requested."""
+    return _build_translation_prompt(raw_text)
 
 
 def _build_brief_prompt(problem_info: dict[str, Any]) -> str:

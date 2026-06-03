@@ -323,6 +323,38 @@ def test_rating_range_env_parser(monkeypatch) -> None:
     assert problem_random._env_rating_range("CF_RATING_TEST", 0, 1) == (0, 1)
 
 
+def test_cookie_header_parses_netscape_cookie_file(tmp_path: Path) -> None:
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text(
+        "\n".join(
+            [
+                "# Netscape HTTP Cookie File",
+                ".codeforces.com\tTRUE\t/\tTRUE\t2147483647\tJSESSIONID\tabc",
+                "#HttpOnly_.codeforces.com\tTRUE\t/\tTRUE\t2147483647\tcf_clearance\tclear",
+                ".atcoder.jp\tTRUE\t/\tTRUE\t2147483647\tREVEL_SESSION\tat",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert problem_random._cookie_header(
+        direct_cookie="",
+        cookie_file=str(cookie_file),
+        domain_hint="codeforces.com",
+    ) == "JSESSIONID=abc; cf_clearance=clear"
+
+
+def test_request_headers_use_env_cookie(monkeypatch) -> None:
+    monkeypatch.setattr(problem_random, "CODEFORCES_COOKIE", "a=b; c=d")
+    monkeypatch.setattr(problem_random, "CODEFORCES_COOKIES_FILE", "")
+    monkeypatch.setattr(problem_random, "CODEFORCES_USER_AGENT", "Test UA")
+
+    headers = problem_random._request_headers_for_source("cf")
+
+    assert headers["User-Agent"] == "Test UA"
+    assert headers["Cookie"] == "a=b; c=d"
+
+
 def test_move_notes_after_samples_keeps_notes_for_the_end() -> None:
     statement, notes = _move_notes_after_samples(
         [
@@ -606,6 +638,8 @@ def test_ensure_difficulty_buffer_keeps_existing_slots(monkeypatch, tmp_path: Pa
         samples_image=str(current_image),
         generated_at="2026-05-30T00:00:00+00:00",
         source="cf",
+        ai_brief="cached solution",
+        statement_text="cached statement",
     )
     upcoming = problem_random.RenderedProblem(
         contest_id=2,
@@ -619,6 +653,8 @@ def test_ensure_difficulty_buffer_keeps_existing_slots(monkeypatch, tmp_path: Pa
         samples_image=str(next_image),
         generated_at="2026-05-30T00:00:00+00:00",
         source="cf",
+        ai_brief="cached solution",
+        statement_text="cached statement",
     )
     problem_random._save_state(
         "easy",
@@ -660,10 +696,12 @@ def test_ensure_difficulty_buffer_fills_missing_next(monkeypatch, tmp_path: Path
         samples_image=str(current_image),
         generated_at="2026-05-30T00:00:00+00:00",
         source="cf",
+        ai_brief="cached solution",
+        statement_text="cached statement",
     )
     problem_random._save_state("easy", {"cur_state": problem_random.asdict(current), "next_state": None}, "cf")
 
-    async def fake_build_random_problem(difficulty_key: str, exclude_keys=None, source="cf"):
+    async def fake_build_random_problem(difficulty_key: str, exclude_keys=None, source="cf", **kwargs):
         assert exclude_keys == {current.key}
         image_dir = problem_random.RENDERED_DIR / "cf_next"
         image_dir.mkdir(parents=True)
@@ -681,6 +719,8 @@ def test_ensure_difficulty_buffer_fills_missing_next(monkeypatch, tmp_path: Path
             samples_image=str(image_path),
             generated_at="2026-05-30T00:00:00+00:00",
             source=source,
+            ai_brief="cached solution",
+            statement_text="cached statement",
         )
 
     monkeypatch.setattr(problem_random, "_build_random_problem", fake_build_random_problem)
