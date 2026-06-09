@@ -7,6 +7,7 @@ from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 
 from bot.services.emoji_reaction import (
+    auto_unicode_binding_action,
     emoji_bindings,
     extract_emoji_id,
     extract_notice_emoji_id,
@@ -50,6 +51,7 @@ async def handle_emoji(bot: Bot, event: MessageEvent, args: Message = CommandArg
     emoji_id = extract_emoji_id(args)
     if emoji_id is None:
         await emoji_cmd.finish("表情不可用。")
+    auto_binding_action = auto_unicode_binding_action(args)
 
     target_message_id = _reply_message_id(event) or getattr(event, "message_id", None)
     if target_message_id is None:
@@ -57,6 +59,8 @@ async def handle_emoji(bot: Bot, event: MessageEvent, args: Message = CommandArg
 
     if not await _set_msg_emoji_like(bot, target_message_id, emoji_id):
         await emoji_cmd.finish("表情不可用。")
+    if auto_binding_action is not None:
+        set_unicode_emoji_binding(auto_binding_action.emoji, auto_binding_action.emoji_id)
     await emoji_cmd.finish()
 
 

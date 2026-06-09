@@ -56,6 +56,9 @@ def extract_emoji_id(message: Iterable[Any], *, allow_text: bool = True) -> str 
     emoji_id = emoji_binding_for(text)
     if emoji_id:
         return emoji_id
+    fallback_id = unicode_emoji_decimal_id(text)
+    if fallback_id:
+        return fallback_id
     return None
 
 
@@ -109,6 +112,19 @@ def parse_emoji_binding_action(message: Iterable[Any]) -> EmojiBindingAction | N
     return EmojiBindingAction(action=action, emoji=emoji, emoji_id=emoji_id)
 
 
+def auto_unicode_binding_action(message: Iterable[Any]) -> EmojiBindingAction | None:
+    text = _plain_text(message).strip()
+    if not text or text.isdigit() or has_emoji_binding_operator(message) or _extract_cq_emoji_id(text):
+        return None
+    emoji = _normalize_unicode_emoji(text)
+    if emoji is None or emoji_binding_for(emoji) is not None:
+        return None
+    emoji_id = unicode_emoji_decimal_id(emoji)
+    if emoji_id is None:
+        return None
+    return EmojiBindingAction(action="bind", emoji=emoji, emoji_id=emoji_id)
+
+
 def has_emoji_binding_operator(message: Iterable[Any]) -> bool:
     text = _plain_text(message).strip()
     return "!=" in text or "=" in text
@@ -145,6 +161,20 @@ def emoji_binding_for(emoji: str) -> str | None:
     if normalized_emoji is None:
         return None
     return emoji_bindings().get(normalized_emoji)
+
+
+def unicode_emoji_decimal_id(emoji: str) -> str | None:
+    normalized_emoji = _normalize_unicode_emoji(emoji)
+    if normalized_emoji is None:
+        return None
+    codepoints = [
+        ord(ch)
+        for ch in normalized_emoji
+        if ord(ch) not in {0xFE0E, 0xFE0F, 0x200D} and _is_emoji_codepoint(ord(ch))
+    ]
+    if not codepoints:
+        return None
+    return str(codepoints[0])
 
 
 def emoji_bindings() -> dict[str, str]:
@@ -244,13 +274,17 @@ def _load_emoji_bindings() -> dict[str, str]:
         emoji_id = _normalize_emoji_id(str(raw_emoji_id))
         if emoji is not None and emoji_id is not None:
             bindings[emoji] = emoji_id
-    return dict(sorted(bindings.items(), key=lambda item: item[0]))
+    return dict(sorted(bindings.items(), key=lambda item: _unicode_sort_key(item[0])))
 
 
 def _save_emoji_bindings(bindings: dict[str, str]) -> None:
     EMOJI_BINDINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"bindings": dict(sorted(bindings.items(), key=lambda item: item[0]))}
+    payload = {"bindings": dict(sorted(bindings.items(), key=lambda item: _unicode_sort_key(item[0])))}
     EMOJI_BINDINGS_PATH.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+
+
+def _unicode_sort_key(value: str) -> tuple[int, ...]:
+    return tuple(ord(ch) for ch in value)

@@ -1,4 +1,5 @@
 from bot.services.emoji_reaction import (
+    auto_unicode_binding_action,
     emoji_binding_for,
     emoji_bindings,
     extract_emoji_id,
@@ -7,6 +8,7 @@ from bot.services.emoji_reaction import (
     parse_emoji_binding_action,
     remove_unicode_emoji_binding,
     set_unicode_emoji_binding,
+    unicode_emoji_decimal_id,
 )
 
 
@@ -129,3 +131,41 @@ def test_extract_unicode_emoji_id_from_binding(tmp_path, monkeypatch) -> None:
     set_unicode_emoji_binding("😀", "101")
 
     assert extract_emoji_id([{"type": "text", "data": {"text": "😀"}}]) == "101"
+
+
+def test_extract_unicode_emoji_id_from_decimal_codepoint(tmp_path, monkeypatch) -> None:
+    from bot.services import emoji_reaction
+
+    monkeypatch.setattr(emoji_reaction, "EMOJI_BINDINGS_PATH", tmp_path / "bindings.json")
+    monkeypatch.setattr(emoji_reaction, "DEFAULT_TEXT_EMOJI_ID_BINDINGS", {})
+
+    assert unicode_emoji_decimal_id("❌") == "10060"
+    assert unicode_emoji_decimal_id("☑️") == "9745"
+    assert extract_emoji_id([{"type": "text", "data": {"text": "❌"}}]) == "10060"
+
+
+def test_auto_unicode_binding_action_uses_decimal_codepoint(tmp_path, monkeypatch) -> None:
+    from bot.services import emoji_reaction
+
+    monkeypatch.setattr(emoji_reaction, "EMOJI_BINDINGS_PATH", tmp_path / "bindings.json")
+    monkeypatch.setattr(emoji_reaction, "DEFAULT_TEXT_EMOJI_ID_BINDINGS", {})
+
+    action = auto_unicode_binding_action([{"type": "text", "data": {"text": "❌"}}])
+
+    assert action is not None
+    assert action.action == "bind"
+    assert action.emoji == "❌"
+    assert action.emoji_id == "10060"
+
+
+def test_emoji_bindings_are_sorted_by_unicode_codepoint(tmp_path, monkeypatch) -> None:
+    from bot.services import emoji_reaction
+
+    monkeypatch.setattr(emoji_reaction, "EMOJI_BINDINGS_PATH", tmp_path / "bindings.json")
+    monkeypatch.setattr(emoji_reaction, "DEFAULT_TEXT_EMOJI_ID_BINDINGS", {})
+
+    set_unicode_emoji_binding("😀", "128512")
+    set_unicode_emoji_binding("❌", "10060")
+    set_unicode_emoji_binding("☑️", "9745")
+
+    assert list(emoji_bindings()) == ["☑️", "❌", "😀"]
