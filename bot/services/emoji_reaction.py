@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
+
+from nonebot.log import logger
 
 
 _CQ_FACE_RE = re.compile(r"\[CQ:face,[^\]]*id=([^,\]]+)")
 _CQ_MFACE_RE = re.compile(r"\[CQ:(?:mface|image),[^\]]*emoji_id=([^,\]]+)")
+LEARNED_EMOJI_PATH = Path("data/emoji_reactions/learned.json")
 TEXT_EMOJI_ID_ALIASES = {
     "㊗": "12951",
     "㊗️": "12951",
@@ -86,6 +91,24 @@ def extract_notice_emoji_id(likes: Any) -> str | None:
     return None
 
 
+def learn_reaction_emoji(emoji_id: str) -> bool:
+    normalized = _normalize_emoji_id(emoji_id)
+    if normalized is None:
+        return False
+    data = _load_learned_emojis()
+    ids = set(data.get("emoji_ids", []))
+    if normalized in ids:
+        return False
+    ids.add(normalized)
+    data["emoji_ids"] = sorted(ids, key=_emoji_id_sort_key)
+    _save_learned_emojis(data)
+    return True
+
+
+def learned_reaction_emojis() -> list[str]:
+    return list(_load_learned_emojis().get("emoji_ids", []))
+
+
 def _segment_type(segment: Any) -> str:
     if isinstance(segment, dict):
         return str(segment.get("type") or "")
@@ -125,3 +148,43 @@ def _extract_cq_emoji_id(text: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def _normalize_emoji_id(value: str) -> str | None:
+    emoji_id = str(value).strip()
+    if not re.fullmatch(r"\d{1,12}", emoji_id):
+        return None
+    return emoji_id
+
+
+def _load_learned_emojis() -> dict[str, list[str]]:
+    if not LEARNED_EMOJI_PATH.exists():
+        return {"emoji_ids": []}
+    try:
+        data = json.loads(LEARNED_EMOJI_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Failed to load learned emoji reactions")
+        return {"emoji_ids": []}
+    if not isinstance(data, dict):
+        return {"emoji_ids": []}
+    raw_ids = data.get("emoji_ids", [])
+    if not isinstance(raw_ids, list):
+        return {"emoji_ids": []}
+    ids = {
+        emoji_id
+        for item in raw_ids
+        if (emoji_id := _normalize_emoji_id(str(item))) is not None
+    }
+    return {"emoji_ids": sorted(ids, key=_emoji_id_sort_key)}
+
+
+def _save_learned_emojis(data: dict[str, Any]) -> None:
+    LEARNED_EMOJI_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LEARNED_EMOJI_PATH.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _emoji_id_sort_key(value: str) -> tuple[int, int | str]:
+    return (0, int(value)) if value.isdigit() else (1, value)

@@ -18,11 +18,13 @@ DEFAULT_ADMIN_HELP_TEXT = """/giveup <cf|at> <难度> - 立即放弃当前题，
 /add <uid> - 将用户加入黑名单
 /remove <uid> - 将用户移出黑名单
 /del <uid> - 超级管理员删除某个用户的榜单数据
-/emoji <表情> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情"""
+/emoji <表情或ID> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情
+/emojilist - 超级管理员查看已学习的贴表情 ID"""
 
 
 REQUIRED_ADMIN_HELP_LINES = (
-    "/emoji <表情> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情",
+    "/emoji <表情或ID> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情",
+    "/emojilist - 超级管理员查看已学习的贴表情 ID",
 )
 
 

@@ -2,6 +2,8 @@ from bot.services.emoji_reaction import (
     extract_emoji_id,
     extract_notice_emoji_id,
     is_single_super_emoji_message,
+    learn_reaction_emoji,
+    learned_reaction_emojis,
 )
 
 
@@ -89,3 +91,15 @@ def test_extract_notice_emoji_id_from_latest_like() -> None:
 
 def test_extract_notice_emoji_id_rejects_invalid_payload() -> None:
     assert extract_notice_emoji_id({"emoji_id": "12951"}) is None
+
+
+def test_learn_reaction_emoji_persists_sorted_ids(tmp_path, monkeypatch) -> None:
+    from bot.services import emoji_reaction
+
+    monkeypatch.setattr(emoji_reaction, "LEARNED_EMOJI_PATH", tmp_path / "learned.json")
+
+    assert learn_reaction_emoji("368")
+    assert learn_reaction_emoji("167")
+    assert not learn_reaction_emoji("368")
+    assert not learn_reaction_emoji("invalid")
+    assert learned_reaction_emojis() == ["167", "368"]

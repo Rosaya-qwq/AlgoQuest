@@ -10,6 +10,8 @@ from bot.services.emoji_reaction import (
     extract_emoji_id,
     extract_notice_emoji_id,
     is_single_super_emoji_message,
+    learn_reaction_emoji,
+    learned_reaction_emojis,
 )
 from bot.services.permissions import is_superuser
 
@@ -17,11 +19,12 @@ from bot.services.permissions import is_superuser
 __plugin_meta__ = PluginMetadata(
     name="表情回应",
     description="超级管理员给消息贴 QQ 表情回应。",
-    usage="/emoji <QQ表情>",
+    usage="/emoji <表情或ID>\n/emojilist",
 )
 
 
 emoji_cmd = on_command("emoji", aliases={"贴表情"}, priority=4, block=True)
+emoji_list_cmd = on_command("emojilist", aliases={"表情列表"}, priority=4, block=True)
 auto_super_emoji = on_message(priority=20, block=False)
 emoji_like_notice = on_notice(priority=20, block=False)
 
@@ -42,6 +45,19 @@ async def handle_emoji(bot: Bot, event: MessageEvent, args: Message = CommandArg
     if not await _set_msg_emoji_like(bot, target_message_id, emoji_id):
         await emoji_cmd.finish("表情不可用。")
     await emoji_cmd.finish()
+
+
+@emoji_list_cmd.handle()
+async def handle_emoji_list(event: MessageEvent) -> None:
+    if not is_superuser(event):
+        await emoji_list_cmd.finish("只有超级管理员可以使用 /emojilist。")
+
+    emoji_ids = learned_reaction_emojis()
+    if not emoji_ids:
+        await emoji_list_cmd.finish("还没有学习到可复用的贴表情 ID。")
+
+    rows = [", ".join(emoji_ids[index : index + 12]) for index in range(0, len(emoji_ids), 12)]
+    await emoji_list_cmd.finish("已学习贴表情 ID：\n" + "\n".join(rows))
 
 
 @auto_super_emoji.handle()
@@ -74,6 +90,7 @@ async def handle_emoji_like_notice(bot: Bot, event: NoticeEvent) -> None:
     emoji_id = extract_notice_emoji_id(getattr(event, "likes", None))
     if message_id is None or emoji_id is None:
         return
+    learn_reaction_emoji(emoji_id)
     await _set_msg_emoji_like(bot, message_id, emoji_id)
 
 

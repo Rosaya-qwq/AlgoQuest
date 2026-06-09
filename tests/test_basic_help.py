@@ -7,7 +7,8 @@ def test_user_help_does_not_include_admin_commands() -> None:
     assert "/random <难度>" not in USER_HELP_TEXT
     assert "/add <uid>" not in USER_HELP_TEXT
     assert "/remove <uid>" not in USER_HELP_TEXT
-    assert "/emoji <表情>" not in USER_HELP_TEXT
+    assert "/emoji <表情" not in USER_HELP_TEXT
+    assert "/emojilist" not in USER_HELP_TEXT
 
 
 def test_admin_help_lists_admin_commands() -> None:
@@ -15,4 +16,5 @@ def test_admin_help_lists_admin_commands() -> None:
     assert "/pass <cf|at> <难度>" in ADMIN_HELP_TEXT
     assert "/add <uid>" in ADMIN_HELP_TEXT
     assert "/remove <uid>" in ADMIN_HELP_TEXT
-    assert "/emoji <表情>" in ADMIN_HELP_TEXT
+    assert "/emoji <表情或ID>" in ADMIN_HELP_TEXT
+    assert "/emojilist" in ADMIN_HELP_TEXT
