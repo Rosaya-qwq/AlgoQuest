@@ -1,9 +1,12 @@
 from bot.services.emoji_reaction import (
+    emoji_binding_for,
+    emoji_bindings,
     extract_emoji_id,
     extract_notice_emoji_id,
     is_single_super_emoji_message,
-    learn_reaction_emoji,
-    learned_reaction_emojis,
+    parse_emoji_binding_action,
+    remove_unicode_emoji_binding,
+    set_unicode_emoji_binding,
 )
 
 
@@ -35,12 +38,6 @@ def test_extract_cq_code_super_emoji_id_from_text() -> None:
     message = [{"type": "text", "data": {"text": "[CQ:mface,emoji_id=777,key=abc]"}}]
 
     assert extract_emoji_id(message) == "777"
-
-
-def test_extract_known_unicode_emoji_alias() -> None:
-    message = [{"type": "text", "data": {"text": "㊗️"}}]
-
-    assert extract_emoji_id(message) == "12951"
 
 
 def test_single_super_emoji_allows_blank_text_around_it() -> None:
@@ -93,13 +90,42 @@ def test_extract_notice_emoji_id_rejects_invalid_payload() -> None:
     assert extract_notice_emoji_id({"emoji_id": "12951"}) is None
 
 
-def test_learn_reaction_emoji_persists_sorted_ids(tmp_path, monkeypatch) -> None:
+def test_unicode_emoji_binding_persists_mappings(tmp_path, monkeypatch) -> None:
     from bot.services import emoji_reaction
 
-    monkeypatch.setattr(emoji_reaction, "LEARNED_EMOJI_PATH", tmp_path / "learned.json")
+    monkeypatch.setattr(emoji_reaction, "EMOJI_BINDINGS_PATH", tmp_path / "bindings.json")
+    monkeypatch.setattr(emoji_reaction, "DEFAULT_TEXT_EMOJI_ID_BINDINGS", {})
 
-    assert learn_reaction_emoji("368")
-    assert learn_reaction_emoji("167")
-    assert not learn_reaction_emoji("368")
-    assert not learn_reaction_emoji("invalid")
-    assert learned_reaction_emojis() == ["167", "368"]
+    assert set_unicode_emoji_binding("😀", "101")
+    assert not set_unicode_emoji_binding("😀", "101")
+    assert set_unicode_emoji_binding("😡", "102")
+    assert not set_unicode_emoji_binding("not-emoji", "103")
+    assert emoji_binding_for("😀") == "101"
+    assert emoji_bindings() == {"😀": "101", "😡": "102"}
+    assert remove_unicode_emoji_binding("😀", "101")
+    assert not remove_unicode_emoji_binding("😀", "101")
+    assert emoji_bindings() == {"😡": "102"}
+
+
+def test_parse_emoji_binding_action() -> None:
+    bind = parse_emoji_binding_action([{"type": "text", "data": {"text": "😀=101"}}])
+    remove = parse_emoji_binding_action([{"type": "text", "data": {"text": "😀!=101"}}])
+
+    assert bind is not None
+    assert bind.action == "bind"
+    assert bind.emoji == "😀"
+    assert bind.emoji_id == "101"
+    assert remove is not None
+    assert remove.action == "remove"
+    assert remove.emoji == "😀"
+    assert remove.emoji_id == "101"
+
+
+def test_extract_unicode_emoji_id_from_binding(tmp_path, monkeypatch) -> None:
+    from bot.services import emoji_reaction
+
+    monkeypatch.setattr(emoji_reaction, "EMOJI_BINDINGS_PATH", tmp_path / "bindings.json")
+    monkeypatch.setattr(emoji_reaction, "DEFAULT_TEXT_EMOJI_ID_BINDINGS", {})
+    set_unicode_emoji_binding("😀", "101")
+
+    assert extract_emoji_id([{"type": "text", "data": {"text": "😀"}}]) == "101"

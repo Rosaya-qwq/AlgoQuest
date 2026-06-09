@@ -3,20 +3,26 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from nonebot.log import logger
 
 
 _CQ_FACE_RE = re.compile(r"\[CQ:face,[^\]]*id=([^,\]]+)")
 _CQ_MFACE_RE = re.compile(r"\[CQ:(?:mface|image),[^\]]*emoji_id=([^,\]]+)")
-LEARNED_EMOJI_PATH = Path("data/emoji_reactions/learned.json")
-TEXT_EMOJI_ID_ALIASES = {
-    "㊗": "12951",
+EMOJI_BINDINGS_PATH = Path("data/emoji_reactions/bindings.json")
+DEFAULT_TEXT_EMOJI_ID_BINDINGS = {
     "㊗️": "12951",
-    "祝": "12951",
 }
+
+
+@dataclass(frozen=True)
+class EmojiBindingAction:
+    action: Literal["bind", "remove"]
+    emoji: str
+    emoji_id: str
 
 
 def extract_emoji_id(message: Iterable[Any], *, allow_text: bool = True) -> str | None:
@@ -45,13 +51,11 @@ def extract_emoji_id(message: Iterable[Any], *, allow_text: bool = True) -> str 
     if cq_value:
         return cq_value
     text = text.strip()
-    alias = TEXT_EMOJI_ID_ALIASES.get(text)
-    if alias:
-        return alias
     if text.isdigit():
         return text
-    if text and len(text) <= 8 and not any(ch.isspace() for ch in text):
-        return text
+    emoji_id = emoji_binding_for(text)
+    if emoji_id:
+        return emoji_id
     return None
 
 
@@ -91,22 +95,60 @@ def extract_notice_emoji_id(likes: Any) -> str | None:
     return None
 
 
-def learn_reaction_emoji(emoji_id: str) -> bool:
-    normalized = _normalize_emoji_id(emoji_id)
-    if normalized is None:
+def parse_emoji_binding_action(message: Iterable[Any]) -> EmojiBindingAction | None:
+    text = _plain_text(message).strip()
+    if not has_emoji_binding_operator(message):
+        return None
+    operator = "!=" if "!=" in text else "="
+    raw_emoji, raw_emoji_id = text.split(operator, 1)
+    emoji = _normalize_unicode_emoji(raw_emoji)
+    emoji_id = _normalize_emoji_id(raw_emoji_id)
+    if emoji is None or emoji_id is None:
+        return None
+    action: Literal["bind", "remove"] = "remove" if operator == "!=" else "bind"
+    return EmojiBindingAction(action=action, emoji=emoji, emoji_id=emoji_id)
+
+
+def has_emoji_binding_operator(message: Iterable[Any]) -> bool:
+    text = _plain_text(message).strip()
+    return "!=" in text or "=" in text
+
+
+def set_unicode_emoji_binding(emoji: str, emoji_id: str) -> bool:
+    normalized_emoji = _normalize_unicode_emoji(emoji)
+    normalized_id = _normalize_emoji_id(emoji_id)
+    if normalized_emoji is None or normalized_id is None:
         return False
-    data = _load_learned_emojis()
-    ids = set(data.get("emoji_ids", []))
-    if normalized in ids:
+    bindings = emoji_bindings()
+    if bindings.get(normalized_emoji) == normalized_id:
         return False
-    ids.add(normalized)
-    data["emoji_ids"] = sorted(ids, key=_emoji_id_sort_key)
-    _save_learned_emojis(data)
+    bindings[normalized_emoji] = normalized_id
+    _save_emoji_bindings(bindings)
     return True
 
 
-def learned_reaction_emojis() -> list[str]:
-    return list(_load_learned_emojis().get("emoji_ids", []))
+def remove_unicode_emoji_binding(emoji: str, emoji_id: str) -> bool:
+    normalized_emoji = _normalize_unicode_emoji(emoji)
+    normalized_id = _normalize_emoji_id(emoji_id)
+    if normalized_emoji is None or normalized_id is None:
+        return False
+    bindings = emoji_bindings()
+    if bindings.get(normalized_emoji) != normalized_id:
+        return False
+    del bindings[normalized_emoji]
+    _save_emoji_bindings(bindings)
+    return True
+
+
+def emoji_binding_for(emoji: str) -> str | None:
+    normalized_emoji = _normalize_unicode_emoji(emoji)
+    if normalized_emoji is None:
+        return None
+    return emoji_bindings().get(normalized_emoji)
+
+
+def emoji_bindings() -> dict[str, str]:
+    return _load_emoji_bindings()
 
 
 def _segment_type(segment: Any) -> str:
@@ -157,34 +199,58 @@ def _normalize_emoji_id(value: str) -> str | None:
     return emoji_id
 
 
-def _load_learned_emojis() -> dict[str, list[str]]:
-    if not LEARNED_EMOJI_PATH.exists():
-        return {"emoji_ids": []}
-    try:
-        data = json.loads(LEARNED_EMOJI_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        logger.exception("Failed to load learned emoji reactions")
-        return {"emoji_ids": []}
-    if not isinstance(data, dict):
-        return {"emoji_ids": []}
-    raw_ids = data.get("emoji_ids", [])
-    if not isinstance(raw_ids, list):
-        return {"emoji_ids": []}
-    ids = {
-        emoji_id
-        for item in raw_ids
-        if (emoji_id := _normalize_emoji_id(str(item))) is not None
-    }
-    return {"emoji_ids": sorted(ids, key=_emoji_id_sort_key)}
+def _normalize_unicode_emoji(value: str) -> str | None:
+    emoji = str(value).strip()
+    if (
+        not emoji
+        or len(emoji) > 16
+        or emoji.isdigit()
+        or "[CQ:" in emoji
+        or any(ch.isspace() for ch in emoji)
+    ):
+        return None
+    if not any(_is_emoji_codepoint(ord(ch)) for ch in emoji):
+        return None
+    return emoji
 
 
-def _save_learned_emojis(data: dict[str, Any]) -> None:
-    LEARNED_EMOJI_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LEARNED_EMOJI_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
+def _is_emoji_codepoint(codepoint: int) -> bool:
+    return (
+        0x1F000 <= codepoint <= 0x1FAFF
+        or 0x2600 <= codepoint <= 0x27BF
+        or 0x2B00 <= codepoint <= 0x2BFF
+        or 0x3000 <= codepoint <= 0x303F
+        or 0x3200 <= codepoint <= 0x32FF
+        or codepoint == 0x20E3
     )
 
 
-def _emoji_id_sort_key(value: str) -> tuple[int, int | str]:
-    return (0, int(value)) if value.isdigit() else (1, value)
+def _load_emoji_bindings() -> dict[str, str]:
+    if not EMOJI_BINDINGS_PATH.exists():
+        return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
+    try:
+        data = json.loads(EMOJI_BINDINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Failed to load emoji bindings")
+        return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
+    if not isinstance(data, dict):
+        return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
+    raw_bindings = data.get("bindings")
+    if not isinstance(raw_bindings, dict):
+        return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
+    bindings: dict[str, str] = {}
+    for raw_emoji, raw_emoji_id in raw_bindings.items():
+        emoji = _normalize_unicode_emoji(str(raw_emoji))
+        emoji_id = _normalize_emoji_id(str(raw_emoji_id))
+        if emoji is not None and emoji_id is not None:
+            bindings[emoji] = emoji_id
+    return dict(sorted(bindings.items(), key=lambda item: item[0]))
+
+
+def _save_emoji_bindings(bindings: dict[str, str]) -> None:
+    EMOJI_BINDINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"bindings": dict(sorted(bindings.items(), key=lambda item: item[0]))}
+    EMOJI_BINDINGS_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )

@@ -7,11 +7,13 @@ from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 
 from bot.services.emoji_reaction import (
+    emoji_bindings,
     extract_emoji_id,
     extract_notice_emoji_id,
     is_single_super_emoji_message,
-    learn_reaction_emoji,
-    learned_reaction_emojis,
+    parse_emoji_binding_action,
+    remove_unicode_emoji_binding,
+    set_unicode_emoji_binding,
 )
 from bot.services.permissions import is_superuser
 
@@ -34,6 +36,17 @@ async def handle_emoji(bot: Bot, event: MessageEvent, args: Message = CommandArg
     if not is_superuser(event):
         await emoji_cmd.finish("只有超级管理员可以使用 /emoji。")
 
+    binding_action = parse_emoji_binding_action(args)
+    if binding_action is not None:
+        if binding_action.action == "bind":
+            changed = set_unicode_emoji_binding(binding_action.emoji, binding_action.emoji_id)
+            suffix = "已绑定" if changed else "绑定未变化"
+            await emoji_cmd.finish(f"{suffix}：{binding_action.emoji} = {binding_action.emoji_id}")
+        removed = remove_unicode_emoji_binding(binding_action.emoji, binding_action.emoji_id)
+        if removed:
+            await emoji_cmd.finish(f"已删除绑定：{binding_action.emoji} != {binding_action.emoji_id}")
+        await emoji_cmd.finish("没有找到对应绑定。")
+
     emoji_id = extract_emoji_id(args)
     if emoji_id is None:
         await emoji_cmd.finish("表情不可用。")
@@ -52,12 +65,12 @@ async def handle_emoji_list(event: MessageEvent) -> None:
     if not is_superuser(event):
         await emoji_list_cmd.finish("只有超级管理员可以使用 /emojilist。")
 
-    emoji_ids = learned_reaction_emojis()
-    if not emoji_ids:
-        await emoji_list_cmd.finish("还没有学习到可复用的贴表情 ID。")
+    bindings = emoji_bindings()
+    if not bindings:
+        await emoji_list_cmd.finish("还没有绑定 Unicode 表情。")
 
-    rows = [", ".join(emoji_ids[index : index + 12]) for index in range(0, len(emoji_ids), 12)]
-    await emoji_list_cmd.finish("已学习贴表情 ID：\n" + "\n".join(rows))
+    rows = [f"{emoji} = {emoji_id}" for emoji, emoji_id in bindings.items()]
+    await emoji_list_cmd.finish("已绑定 Unicode 表情：\n" + "\n".join(rows))
 
 
 @auto_super_emoji.handle()
@@ -90,7 +103,6 @@ async def handle_emoji_like_notice(bot: Bot, event: NoticeEvent) -> None:
     emoji_id = extract_notice_emoji_id(getattr(event, "likes", None))
     if message_id is None or emoji_id is None:
         return
-    learn_reaction_emoji(emoji_id)
     await _set_msg_emoji_like(bot, message_id, emoji_id)
 
 
