@@ -7,6 +7,11 @@ from typing import Any
 
 _CQ_FACE_RE = re.compile(r"\[CQ:face,[^\]]*id=([^,\]]+)")
 _CQ_MFACE_RE = re.compile(r"\[CQ:(?:mface|image),[^\]]*emoji_id=([^,\]]+)")
+TEXT_EMOJI_ID_ALIASES = {
+    "㊗": "12951",
+    "㊗️": "12951",
+    "祝": "12951",
+}
 
 
 def extract_emoji_id(message: Iterable[Any], *, allow_text: bool = True) -> str | None:
@@ -35,6 +40,9 @@ def extract_emoji_id(message: Iterable[Any], *, allow_text: bool = True) -> str 
     if cq_value:
         return cq_value
     text = text.strip()
+    alias = TEXT_EMOJI_ID_ALIASES.get(text)
+    if alias:
+        return alias
     if text.isdigit():
         return text
     if text and len(text) <= 8 and not any(ch.isspace() for ch in text):
@@ -61,6 +69,18 @@ def is_single_super_emoji_message(message: Iterable[Any]) -> bool:
             continue
         return False
     return emoji_segments == 1
+
+
+def extract_notice_emoji_id(likes: Any) -> str | None:
+    if not isinstance(likes, list):
+        return None
+    for like in reversed(likes):
+        if not isinstance(like, dict):
+            continue
+        emoji_id = like.get("emoji_id")
+        if emoji_id:
+            return str(emoji_id)
+    return None
 
 
 def _segment_type(segment: Any) -> str:

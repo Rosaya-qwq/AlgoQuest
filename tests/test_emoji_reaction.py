@@ -1,4 +1,8 @@
-from bot.services.emoji_reaction import extract_emoji_id, is_single_super_emoji_message
+from bot.services.emoji_reaction import (
+    extract_emoji_id,
+    extract_notice_emoji_id,
+    is_single_super_emoji_message,
+)
 
 
 def test_extract_builtin_face_id() -> None:
@@ -31,6 +35,12 @@ def test_extract_cq_code_super_emoji_id_from_text() -> None:
     assert extract_emoji_id(message) == "777"
 
 
+def test_extract_known_unicode_emoji_alias() -> None:
+    message = [{"type": "text", "data": {"text": "㊗️"}}]
+
+    assert extract_emoji_id(message) == "12951"
+
+
 def test_single_super_emoji_allows_blank_text_around_it() -> None:
     message = [
         {"type": "text", "data": {"text": " "}},
@@ -54,3 +64,13 @@ def test_single_super_emoji_rejects_extra_text() -> None:
     ]
 
     assert not is_single_super_emoji_message(message)
+
+
+def test_extract_notice_emoji_id_from_latest_like() -> None:
+    likes = [{"emoji_id": "12951", "count": 4}, {"emoji_id": "368", "count": 1}]
+
+    assert extract_notice_emoji_id(likes) == "368"
+
+
+def test_extract_notice_emoji_id_rejects_invalid_payload() -> None:
+    assert extract_notice_emoji_id({"emoji_id": "12951"}) is None

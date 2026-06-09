@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from nonebot import on_command, on_message
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
+from nonebot import on_command, on_message, on_notice
+from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, NoticeEvent
 from nonebot.log import logger
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 
-from bot.services.emoji_reaction import extract_emoji_id, is_single_super_emoji_message
+from bot.services.emoji_reaction import (
+    extract_emoji_id,
+    extract_notice_emoji_id,
+    is_single_super_emoji_message,
+)
 from bot.services.permissions import is_superuser
 
 
@@ -19,6 +23,7 @@ __plugin_meta__ = PluginMetadata(
 
 emoji_cmd = on_command("emoji", aliases={"贴表情"}, priority=4, block=True)
 auto_super_emoji = on_message(priority=20, block=False)
+emoji_like_notice = on_notice(priority=20, block=False)
 
 
 @emoji_cmd.handle()
@@ -52,6 +57,24 @@ async def handle_auto_super_emoji(bot: Bot, event: MessageEvent) -> None:
         return
     if not await _set_msg_emoji_like(bot, message_id, emoji_id):
         return
+
+
+@emoji_like_notice.handle()
+async def handle_emoji_like_notice(bot: Bot, event: NoticeEvent) -> None:
+    if not is_superuser(event):
+        return
+    if getattr(event, "notice_type", None) != "group_msg_emoji_like":
+        return
+    if getattr(event, "self_id", None) == getattr(event, "user_id", None):
+        return
+    if getattr(event, "is_add", True) is False:
+        return
+
+    message_id = getattr(event, "message_id", None)
+    emoji_id = extract_notice_emoji_id(getattr(event, "likes", None))
+    if message_id is None or emoji_id is None:
+        return
+    await _set_msg_emoji_like(bot, message_id, emoji_id)
 
 
 async def _set_msg_emoji_like(bot: Bot, message_id: int | str, emoji_id: str) -> bool:
