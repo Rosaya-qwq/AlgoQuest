@@ -32,6 +32,7 @@ plugins = [
     "bot.plugins.submission",
     "bot.plugins.ranklist",
     "bot.plugins.blacklist",
+    "bot.plugins.emoji_reaction",
 ]
 plugin_dirs = []
 builtin_plugins = []

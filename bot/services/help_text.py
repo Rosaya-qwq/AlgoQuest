@@ -17,7 +17,13 @@ DEFAULT_ADMIN_HELP_TEXT = """/giveup <cf|at> <难度> - 立即放弃当前题，
 /pass <cf|at> <难度> - 管理员回复用户提交消息，强制当前题通过并按 /submit 通过计分
 /add <uid> - 将用户加入黑名单
 /remove <uid> - 将用户移出黑名单
-/del <uid> - 超级管理员删除某个用户的榜单数据"""
+/del <uid> - 超级管理员删除某个用户的榜单数据
+/emoji <表情> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情"""
+
+
+REQUIRED_ADMIN_HELP_LINES = (
+    "/emoji <表情> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情",
+)
 
 
 def user_help_text() -> str:
@@ -25,7 +31,11 @@ def user_help_text() -> str:
 
 
 def admin_help_text() -> str:
-    return env_text("ALGOQUEST_ADMIN_HELP_TEXT", DEFAULT_ADMIN_HELP_TEXT).format(app_name=app_name())
+    text = env_text("ALGOQUEST_ADMIN_HELP_TEXT", DEFAULT_ADMIN_HELP_TEXT).format(app_name=app_name())
+    for line in REQUIRED_ADMIN_HELP_LINES:
+        if line not in text:
+            text = f"{text.rstrip()}\n{line}"
+    return text
 
 
 USER_HELP_TEXT = user_help_text()
