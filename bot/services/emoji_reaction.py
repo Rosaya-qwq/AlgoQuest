@@ -25,6 +25,12 @@ class EmojiBindingAction:
     emoji_id: str
 
 
+@dataclass(frozen=True)
+class EmojiBindingValidation:
+    emoji: str
+    emoji_id: str
+
+
 def extract_emoji_id(message: Iterable[Any], *, allow_text: bool = True) -> str | None:
     """Extract a NapCat set_msg_emoji_like emoji id from a message.
 
@@ -104,19 +110,22 @@ def parse_emoji_binding_action(message: Iterable[Any]) -> EmojiBindingAction | N
         return None
     operator = "!=" if "!=" in text else "="
     raw_emoji, raw_emoji_id = text.split(operator, 1)
-    emoji = _normalize_unicode_emoji(raw_emoji)
-    emoji_id = _normalize_emoji_id(raw_emoji_id)
-    if emoji is None or emoji_id is None:
+    validation = validate_emoji_binding(raw_emoji, raw_emoji_id)
+    if validation is None:
         return None
     action: Literal["bind", "remove"] = "remove" if operator == "!=" else "bind"
-    return EmojiBindingAction(action=action, emoji=emoji, emoji_id=emoji_id)
+    return EmojiBindingAction(
+        action=action,
+        emoji=validation.emoji,
+        emoji_id=validation.emoji_id,
+    )
 
 
 def auto_unicode_binding_action(message: Iterable[Any]) -> EmojiBindingAction | None:
     text = _plain_text(message).strip()
     if not text or text.isdigit() or has_emoji_binding_operator(message) or _extract_cq_emoji_id(text):
         return None
-    emoji = _normalize_unicode_emoji(text)
+    emoji = normalize_single_unicode_emoji(text)
     if emoji is None or emoji_binding_for(emoji) is not None:
         return None
     emoji_id = unicode_emoji_decimal_id(emoji)
@@ -131,40 +140,38 @@ def has_emoji_binding_operator(message: Iterable[Any]) -> bool:
 
 
 def set_unicode_emoji_binding(emoji: str, emoji_id: str) -> bool:
-    normalized_emoji = _normalize_unicode_emoji(emoji)
-    normalized_id = _normalize_emoji_id(emoji_id)
-    if normalized_emoji is None or normalized_id is None:
+    validation = validate_emoji_binding(emoji, emoji_id)
+    if validation is None:
         return False
     bindings = emoji_bindings()
-    if bindings.get(normalized_emoji) == normalized_id:
+    if bindings.get(validation.emoji) == validation.emoji_id:
         return False
-    bindings[normalized_emoji] = normalized_id
+    bindings[validation.emoji] = validation.emoji_id
     _save_emoji_bindings(bindings)
     return True
 
 
 def remove_unicode_emoji_binding(emoji: str, emoji_id: str) -> bool:
-    normalized_emoji = _normalize_unicode_emoji(emoji)
-    normalized_id = _normalize_emoji_id(emoji_id)
-    if normalized_emoji is None or normalized_id is None:
+    validation = validate_emoji_binding(emoji, emoji_id)
+    if validation is None:
         return False
     bindings = emoji_bindings()
-    if bindings.get(normalized_emoji) != normalized_id:
+    if bindings.get(validation.emoji) != validation.emoji_id:
         return False
-    del bindings[normalized_emoji]
+    del bindings[validation.emoji]
     _save_emoji_bindings(bindings)
     return True
 
 
 def emoji_binding_for(emoji: str) -> str | None:
-    normalized_emoji = _normalize_unicode_emoji(emoji)
+    normalized_emoji = normalize_single_unicode_emoji(emoji)
     if normalized_emoji is None:
         return None
     return emoji_bindings().get(normalized_emoji)
 
 
 def unicode_emoji_decimal_id(emoji: str) -> str | None:
-    normalized_emoji = _normalize_unicode_emoji(emoji)
+    normalized_emoji = normalize_single_unicode_emoji(emoji)
     if normalized_emoji is None:
         return None
     codepoints = [
@@ -179,6 +186,14 @@ def unicode_emoji_decimal_id(emoji: str) -> str | None:
 
 def emoji_bindings() -> dict[str, str]:
     return _load_emoji_bindings()
+
+
+def validate_emoji_binding(emoji: str, emoji_id: str) -> EmojiBindingValidation | None:
+    normalized_emoji = normalize_single_unicode_emoji(emoji)
+    normalized_id = _normalize_emoji_id(emoji_id)
+    if normalized_emoji is None or normalized_id is None:
+        return None
+    return EmojiBindingValidation(emoji=normalized_emoji, emoji_id=normalized_id)
 
 
 def _segment_type(segment: Any) -> str:
@@ -229,19 +244,20 @@ def _normalize_emoji_id(value: str) -> str | None:
     return emoji_id
 
 
-def _normalize_unicode_emoji(value: str) -> str | None:
+def normalize_single_unicode_emoji(value: str) -> str | None:
     emoji = str(value).strip()
-    if (
-        not emoji
-        or len(emoji) > 16
-        or emoji.isdigit()
-        or "[CQ:" in emoji
-        or any(ch.isspace() for ch in emoji)
-    ):
+    if not emoji or emoji.isdigit() or "[CQ:" in emoji or any(ch.isspace() for ch in emoji):
         return None
-    if not any(_is_emoji_codepoint(ord(ch)) for ch in emoji):
+    if "\u200d" in emoji:
         return None
-    return emoji
+    codepoints = [ord(ch) for ch in emoji]
+    stripped = [codepoint for codepoint in codepoints if codepoint not in {0xFE0E, 0xFE0F}]
+    if len(stripped) != 1:
+        return None
+    codepoint = stripped[0]
+    if not _is_emoji_codepoint(codepoint):
+        return None
+    return chr(codepoint)
 
 
 def _is_emoji_codepoint(codepoint: int) -> bool:
@@ -270,10 +286,9 @@ def _load_emoji_bindings() -> dict[str, str]:
         return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
     bindings: dict[str, str] = {}
     for raw_emoji, raw_emoji_id in raw_bindings.items():
-        emoji = _normalize_unicode_emoji(str(raw_emoji))
-        emoji_id = _normalize_emoji_id(str(raw_emoji_id))
-        if emoji is not None and emoji_id is not None:
-            bindings[emoji] = emoji_id
+        validation = validate_emoji_binding(str(raw_emoji), str(raw_emoji_id))
+        if validation is not None:
+            bindings[validation.emoji] = validation.emoji_id
     return dict(sorted(bindings.items(), key=lambda item: _unicode_sort_key(item[0])))
 
 

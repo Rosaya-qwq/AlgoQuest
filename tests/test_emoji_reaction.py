@@ -9,6 +9,7 @@ from bot.services.emoji_reaction import (
     remove_unicode_emoji_binding,
     set_unicode_emoji_binding,
     unicode_emoji_decimal_id,
+    validate_emoji_binding,
 )
 
 
@@ -109,9 +110,29 @@ def test_unicode_emoji_binding_persists_mappings(tmp_path, monkeypatch) -> None:
     assert emoji_bindings() == {"😡": "102"}
 
 
+def test_unicode_emoji_binding_normalizes_variant_selector(tmp_path, monkeypatch) -> None:
+    from bot.services import emoji_reaction
+
+    monkeypatch.setattr(emoji_reaction, "EMOJI_BINDINGS_PATH", tmp_path / "bindings.json")
+    monkeypatch.setattr(emoji_reaction, "DEFAULT_TEXT_EMOJI_ID_BINDINGS", {})
+
+    assert set_unicode_emoji_binding("😈️", "210")
+    assert set_unicode_emoji_binding("😈", "216")
+    assert emoji_binding_for("😈️") == "216"
+    assert emoji_bindings() == {"😈": "216"}
+
+
+def test_validate_emoji_binding_rejects_non_single_emoji_and_non_numeric_id() -> None:
+    assert validate_emoji_binding("😈", "0216") is not None
+    assert validate_emoji_binding("😈😡", "210") is None
+    assert validate_emoji_binding("👨‍👩‍👧‍👦", "210") is None
+    assert validate_emoji_binding("A", "210") is None
+    assert validate_emoji_binding("😈", "abc") is None
+
+
 def test_parse_emoji_binding_action() -> None:
-    bind = parse_emoji_binding_action([{"type": "text", "data": {"text": "😀=101"}}])
-    remove = parse_emoji_binding_action([{"type": "text", "data": {"text": "😀!=101"}}])
+    bind = parse_emoji_binding_action([{"type": "text", "data": {"text": "😀️=101"}}])
+    remove = parse_emoji_binding_action([{"type": "text", "data": {"text": "😀️!=101"}}])
 
     assert bind is not None
     assert bind.action == "bind"
@@ -141,6 +162,7 @@ def test_extract_unicode_emoji_id_from_decimal_codepoint(tmp_path, monkeypatch) 
 
     assert unicode_emoji_decimal_id("❌") == "10060"
     assert unicode_emoji_decimal_id("☑️") == "9745"
+    assert unicode_emoji_decimal_id("😈️") == "128520"
     assert extract_emoji_id([{"type": "text", "data": {"text": "❌"}}]) == "10060"
 
 
@@ -168,4 +190,4 @@ def test_emoji_bindings_are_sorted_by_unicode_codepoint(tmp_path, monkeypatch) -
     set_unicode_emoji_binding("❌", "10060")
     set_unicode_emoji_binding("☑️", "9745")
 
-    assert list(emoji_bindings()) == ["☑️", "❌", "😀"]
+    assert list(emoji_bindings()) == ["☑", "❌", "😀"]
