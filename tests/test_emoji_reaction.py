@@ -4,6 +4,7 @@ from bot.services.emoji_reaction import (
     emoji_bindings,
     extract_emoji_id,
     extract_notice_emoji_id,
+    is_single_reaction_emoji_message,
     is_single_super_emoji_message,
     parse_emoji_binding_action,
     remove_unicode_emoji_binding,
@@ -57,6 +58,26 @@ def test_single_super_emoji_rejects_builtin_face() -> None:
     message = [{"type": "face", "data": {"id": "14"}}]
 
     assert not is_single_super_emoji_message(message)
+
+
+def test_single_reaction_emoji_accepts_builtin_face() -> None:
+    message = [{"type": "face", "data": {"id": "14"}}]
+
+    assert is_single_reaction_emoji_message(message)
+    assert extract_emoji_id(message) == "14"
+
+
+def test_single_reaction_emoji_accepts_unicode_text() -> None:
+    message = [{"type": "text", "data": {"text": "❌"}}]
+
+    assert is_single_reaction_emoji_message(message)
+    assert extract_emoji_id(message) == "10060"
+
+
+def test_single_reaction_emoji_rejects_unicode_text_with_extra_text() -> None:
+    message = [{"type": "text", "data": {"text": "❌!"}}]
+
+    assert not is_single_reaction_emoji_message(message)
 
 
 def test_single_super_emoji_accepts_face_type_three() -> None:
@@ -191,3 +212,12 @@ def test_emoji_bindings_are_sorted_by_unicode_codepoint(tmp_path, monkeypatch) -
     set_unicode_emoji_binding("☑️", "9745")
 
     assert list(emoji_bindings()) == ["☑", "❌", "😀"]
+
+
+def test_default_emoji_bindings_are_normalized(tmp_path, monkeypatch) -> None:
+    from bot.services import emoji_reaction
+
+    monkeypatch.setattr(emoji_reaction, "EMOJI_BINDINGS_PATH", tmp_path / "missing.json")
+    monkeypatch.setattr(emoji_reaction, "DEFAULT_TEXT_EMOJI_ID_BINDINGS", {"☑️": "9745"})
+
+    assert emoji_bindings() == {"☑": "9745"}

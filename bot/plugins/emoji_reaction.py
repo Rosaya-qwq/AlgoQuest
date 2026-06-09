@@ -11,6 +11,7 @@ from bot.services.emoji_reaction import (
     emoji_bindings,
     extract_emoji_id,
     extract_notice_emoji_id,
+    is_single_reaction_emoji_message,
     is_single_super_emoji_message,
     parse_emoji_binding_action,
     remove_unicode_emoji_binding,
@@ -28,7 +29,7 @@ __plugin_meta__ = PluginMetadata(
 
 emoji_cmd = on_command("emoji", aliases={"贴表情"}, priority=4, block=True)
 emoji_list_cmd = on_command("emojilist", aliases={"表情列表"}, priority=4, block=True)
-auto_super_emoji = on_message(priority=20, block=False)
+auto_emoji = on_message(priority=20, block=False)
 emoji_like_notice = on_notice(priority=20, block=False)
 
 
@@ -77,19 +78,22 @@ async def handle_emoji_list(event: MessageEvent) -> None:
     await emoji_list_cmd.finish("已绑定 Unicode 表情：\n" + "\n".join(rows))
 
 
-@auto_super_emoji.handle()
-async def handle_auto_super_emoji(bot: Bot, event: MessageEvent) -> None:
+@auto_emoji.handle()
+async def handle_auto_emoji(bot: Bot, event: MessageEvent) -> None:
     if not is_superuser(event):
         return
-    if not is_single_super_emoji_message(event.message):
+    if not is_single_reaction_emoji_message(event.message):
         return
 
-    emoji_id = extract_emoji_id(event.message, allow_text=False)
+    emoji_id = extract_emoji_id(event.message)
     message_id = getattr(event, "message_id", None)
     if emoji_id is None or message_id is None:
         return
     if not await _set_msg_emoji_like(bot, message_id, emoji_id):
         return
+    auto_binding_action = auto_unicode_binding_action(event.message)
+    if auto_binding_action is not None:
+        set_unicode_emoji_binding(auto_binding_action.emoji, auto_binding_action.emoji_id)
 
 
 @emoji_like_notice.handle()

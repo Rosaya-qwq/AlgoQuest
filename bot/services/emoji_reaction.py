@@ -68,6 +68,40 @@ def extract_emoji_id(message: Iterable[Any], *, allow_text: bool = True) -> str 
     return None
 
 
+def is_single_reaction_emoji_message(message: Iterable[Any]) -> bool:
+    """Return True when the message is only one Unicode or QQ reaction emoji."""
+    emoji_segments = 0
+    for segment in message:
+        segment_type = _segment_type(segment)
+        data = _segment_data(segment)
+        if segment_type == "text":
+            text = str(data.get("text") or "").strip()
+            if not text:
+                continue
+            if normalize_single_unicode_emoji(text) is not None:
+                emoji_segments += 1
+                continue
+            return False
+        if segment_type == "face":
+            if data.get("id"):
+                emoji_segments += 1
+                continue
+            if _is_super_face(data):
+                emoji_segments += 1
+                continue
+            return False
+        if segment_type == "mface":
+            if data.get("emoji_id") or data.get("emojiId"):
+                emoji_segments += 1
+                continue
+            return False
+        if segment_type == "image" and (data.get("emoji_id") or data.get("emojiId")):
+            emoji_segments += 1
+            continue
+        return False
+    return emoji_segments == 1
+
+
 def is_single_super_emoji_message(message: Iterable[Any]) -> bool:
     """Return True when the message is only a QQ mall/super expression."""
     emoji_segments = 0
@@ -273,17 +307,17 @@ def _is_emoji_codepoint(codepoint: int) -> bool:
 
 def _load_emoji_bindings() -> dict[str, str]:
     if not EMOJI_BINDINGS_PATH.exists():
-        return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
+        return _default_emoji_bindings()
     try:
         data = json.loads(EMOJI_BINDINGS_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         logger.exception("Failed to load emoji bindings")
-        return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
+        return _default_emoji_bindings()
     if not isinstance(data, dict):
-        return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
+        return _default_emoji_bindings()
     raw_bindings = data.get("bindings")
     if not isinstance(raw_bindings, dict):
-        return dict(DEFAULT_TEXT_EMOJI_ID_BINDINGS)
+        return _default_emoji_bindings()
     bindings: dict[str, str] = {}
     for raw_emoji, raw_emoji_id in raw_bindings.items():
         validation = validate_emoji_binding(str(raw_emoji), str(raw_emoji_id))
@@ -303,3 +337,12 @@ def _save_emoji_bindings(bindings: dict[str, str]) -> None:
 
 def _unicode_sort_key(value: str) -> tuple[int, ...]:
     return tuple(ord(ch) for ch in value)
+
+
+def _default_emoji_bindings() -> dict[str, str]:
+    bindings: dict[str, str] = {}
+    for raw_emoji, raw_emoji_id in DEFAULT_TEXT_EMOJI_ID_BINDINGS.items():
+        validation = validate_emoji_binding(raw_emoji, raw_emoji_id)
+        if validation is not None:
+            bindings[validation.emoji] = validation.emoji_id
+    return dict(sorted(bindings.items(), key=lambda item: _unicode_sort_key(item[0])))
