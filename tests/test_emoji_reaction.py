@@ -57,6 +57,21 @@ def test_single_super_emoji_rejects_builtin_face() -> None:
     assert not is_single_super_emoji_message(message)
 
 
+def test_single_super_emoji_accepts_face_type_three() -> None:
+    message = [
+        {
+            "type": "face",
+            "data": {
+                "id": "368",
+                "raw": {"faceIndex": 368, "faceText": "/奥特笑哭", "faceType": 3},
+            },
+        }
+    ]
+
+    assert is_single_super_emoji_message(message)
+    assert extract_emoji_id(message, allow_text=False) == "368"
+
+
 def test_single_super_emoji_rejects_extra_text() -> None:
     message = [
         {"type": "mface", "data": {"emoji_id": "888"}},

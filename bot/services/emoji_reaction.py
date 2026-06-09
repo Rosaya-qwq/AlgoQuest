@@ -64,6 +64,9 @@ def is_single_super_emoji_message(message: Iterable[Any]) -> bool:
             if data.get("emoji_id") or data.get("emojiId"):
                 emoji_segments += 1
                 continue
+        if segment_type == "face" and _is_super_face(data):
+            emoji_segments += 1
+            continue
         if segment_type == "image" and (data.get("emoji_id") or data.get("emojiId")):
             emoji_segments += 1
             continue
@@ -95,6 +98,16 @@ def _segment_data(segment: Any) -> dict[str, Any]:
     else:
         data = getattr(segment, "data", {}) or {}
     return data if isinstance(data, dict) else {}
+
+
+def _is_super_face(data: dict[str, Any]) -> bool:
+    raw = data.get("raw")
+    if not isinstance(raw, dict):
+        return False
+    try:
+        return int(raw.get("faceType", 0)) == 3
+    except (TypeError, ValueError):
+        return False
 
 
 def _plain_text(message: Iterable[Any]) -> str:
