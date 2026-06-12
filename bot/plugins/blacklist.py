@@ -36,7 +36,7 @@ async def block_blacklisted_users(event: Event) -> None:
 @add_cmd.handle()
 async def handle_add(event: Event, args: Message = CommandArg()) -> None:
     if not is_superuser(event):
-        await add_cmd.finish("只有管理员可以修改黑名单。")
+        await add_cmd.finish()
 
     uid = normalize_uid(args.extract_plain_text())
     if uid is None:
@@ -51,7 +51,7 @@ async def handle_add(event: Event, args: Message = CommandArg()) -> None:
 @remove_cmd.handle()
 async def handle_remove(event: Event, args: Message = CommandArg()) -> None:
     if not is_superuser(event):
-        await remove_cmd.finish("只有管理员可以修改黑名单。")
+        await remove_cmd.finish()
 
     uid = normalize_uid(args.extract_plain_text())
     if uid is None:
@@ -66,7 +66,7 @@ async def handle_remove(event: Event, args: Message = CommandArg()) -> None:
 @del_cmd.handle()
 async def handle_del(event: Event, args: Message = CommandArg()) -> None:
     if not is_superuser(event):
-        await del_cmd.finish("只有超级管理员可以删除榜单用户数据。")
+        await del_cmd.finish()
 
     uid = normalize_uid(args.extract_plain_text())
     if uid is None:

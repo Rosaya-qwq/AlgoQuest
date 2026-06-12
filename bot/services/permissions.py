@@ -21,6 +21,10 @@ def is_superuser(event: Event) -> bool:
 async def is_group_admin_or_superuser(bot: Bot, event: Event) -> bool:
     if is_superuser(event):
         return True
+    return await is_group_admin(bot, event)
+
+
+async def is_group_admin(bot: Bot, event: Event) -> bool:
     if not isinstance(event, GroupMessageEvent):
         return False
     user_id = get_event_user_id(event)

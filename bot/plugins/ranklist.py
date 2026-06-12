@@ -8,7 +8,8 @@ from nonebot.adapters.onebot.v11 import Bot, Event, GroupMessageEvent, Message, 
 from nonebot.log import logger
 from nonebot.plugin import PluginMetadata
 
-from bot.services.permissions import get_event_user_id, is_group_admin_or_superuser
+from bot.services.group_config import algo_enabled_for_event, rank_mode_for_event
+from bot.services.permissions import get_event_user_id, is_group_admin, is_superuser
 from bot.services.ranklist import render_ranklist_image, render_user_rank_image
 from bot.services.submission import remove_rank_user
 
@@ -25,9 +26,14 @@ rank_cmd = on_command("rank", aliases={"排行榜", "排名"}, priority=5, block
 
 @rank_cmd.handle()
 async def handle_rank(bot: Bot, event: Event) -> None:
+    superuser = is_superuser(event)
+    if not superuser and not algo_enabled_for_event(event):
+        await rank_cmd.finish()
+
     remove_rank_user(str(bot.self_id))
     try:
-        if await is_group_admin_or_superuser(bot, event):
+        can_view_all = superuser or rank_mode_for_event(event) == "all" or await is_group_admin(bot, event)
+        if can_view_all:
             user_names = await _resolve_rank_user_names(bot, event)
             image_path = await render_ranklist_image(user_names=user_names)
         else:

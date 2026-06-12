@@ -8,38 +8,36 @@ from nonebot.plugin import PluginMetadata
 
 from bot.services.emoji_reaction import (
     auto_unicode_binding_action,
-    emoji_bindings,
     extract_emoji_id,
     extract_notice_emoji_id,
     is_single_reaction_emoji_message,
-    is_single_super_emoji_message,
     parse_emoji_binding_action,
     remove_unicode_emoji_binding,
     set_unicode_emoji_binding,
 )
+from bot.services.group_config import emoji_enabled_for_event
 from bot.services.permissions import is_superuser
 
 
 __plugin_meta__ = PluginMetadata(
     name="表情回应",
     description="超级管理员给消息贴 QQ 表情回应。",
-    usage="/emoji <表情或ID>\n/emojilist",
+    usage="/emoji <表情或ID>",
 )
 
 
 emoji_cmd = on_command("emoji", aliases={"贴表情"}, priority=4, block=True)
-emoji_list_cmd = on_command("emojilist", aliases={"表情列表"}, priority=4, block=True)
 auto_emoji = on_message(priority=20, block=False)
 emoji_like_notice = on_notice(priority=20, block=False)
 
 
 @emoji_cmd.handle()
 async def handle_emoji(bot: Bot, event: MessageEvent, args: Message = CommandArg()) -> None:
-    if not is_superuser(event):
-        await emoji_cmd.finish("只有超级管理员可以使用 /emoji。")
-
+    superuser = is_superuser(event)
     binding_action = parse_emoji_binding_action(args)
     if binding_action is not None:
+        if not superuser:
+            await emoji_cmd.finish()
         if binding_action.action == "bind":
             changed = set_unicode_emoji_binding(binding_action.emoji, binding_action.emoji_id)
             suffix = "已绑定" if changed else "绑定未变化"
@@ -48,6 +46,9 @@ async def handle_emoji(bot: Bot, event: MessageEvent, args: Message = CommandArg
         if removed:
             await emoji_cmd.finish(f"已删除绑定：{binding_action.emoji} != {binding_action.emoji_id}")
         await emoji_cmd.finish("没有找到对应绑定。")
+
+    if not superuser and not emoji_enabled_for_event(event):
+        await emoji_cmd.finish()
 
     emoji_id = extract_emoji_id(args)
     if emoji_id is None:
@@ -65,22 +66,10 @@ async def handle_emoji(bot: Bot, event: MessageEvent, args: Message = CommandArg
     await emoji_cmd.finish()
 
 
-@emoji_list_cmd.handle()
-async def handle_emoji_list(event: MessageEvent) -> None:
-    if not is_superuser(event):
-        await emoji_list_cmd.finish("只有超级管理员可以使用 /emojilist。")
-
-    bindings = emoji_bindings()
-    if not bindings:
-        await emoji_list_cmd.finish("还没有绑定 Unicode 表情。")
-
-    rows = [f"{emoji} = {emoji_id}" for emoji, emoji_id in bindings.items()]
-    await emoji_list_cmd.finish("已绑定 Unicode 表情：\n" + "\n".join(rows))
-
-
 @auto_emoji.handle()
 async def handle_auto_emoji(bot: Bot, event: MessageEvent) -> None:
-    if not is_superuser(event):
+    superuser = is_superuser(event)
+    if not superuser and not emoji_enabled_for_event(event):
         return
     if not is_single_reaction_emoji_message(event.message):
         return
@@ -92,13 +81,13 @@ async def handle_auto_emoji(bot: Bot, event: MessageEvent) -> None:
     if not await _set_msg_emoji_like(bot, message_id, emoji_id):
         return
     auto_binding_action = auto_unicode_binding_action(event.message)
-    if auto_binding_action is not None:
+    if superuser and auto_binding_action is not None:
         set_unicode_emoji_binding(auto_binding_action.emoji, auto_binding_action.emoji_id)
 
 
 @emoji_like_notice.handle()
 async def handle_emoji_like_notice(bot: Bot, event: NoticeEvent) -> None:
-    if not is_superuser(event):
+    if not is_superuser(event) and not emoji_enabled_for_event(event):
         return
     if getattr(event, "notice_type", None) != "group_msg_emoji_like":
         return

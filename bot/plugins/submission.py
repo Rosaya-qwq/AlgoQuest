@@ -16,7 +16,8 @@ from bot.services.problem_random import (
     read_problem_markdown,
     read_problem_tutorial,
 )
-from bot.services.permissions import get_event_user_id, is_group_admin_or_superuser, is_superuser
+from bot.services.group_config import algo_enabled_for_event
+from bot.services.permissions import get_event_user_id, is_group_admin, is_superuser
 from bot.services.submission import (
     apply_rating_update,
     format_review_message,
@@ -49,6 +50,10 @@ _first_blood_snapshot_keys: set[str] = set()
 
 @submit_cmd.handle()
 async def handle_submit(bot: Bot, event: Event, args: Message = CommandArg()) -> None:
+    superuser = is_superuser(event)
+    if not superuser and not algo_enabled_for_event(event):
+        await submit_cmd.finish()
+
     reply_prefix = _reply_to_event(event)
     user_id = _event_user_id(event)
     if user_id is None:
@@ -147,6 +152,10 @@ async def handle_submit(bot: Bot, event: Event, args: Message = CommandArg()) ->
 
 @pass_cmd.handle()
 async def handle_pass(bot: Bot, event: Event, args: Message = CommandArg()) -> None:
+    superuser = is_superuser(event)
+    if not superuser and not algo_enabled_for_event(event):
+        await pass_cmd.finish()
+
     source, difficulty_key, extra_arg = parse_submit_args(args.extract_plain_text())
     if source is None or difficulty_key is None:
         await pass_cmd.finish("用法：回复用户提交消息，发送 /pass <cf|at> <难度>\n\n" + difficulty_usage("/pass"))
@@ -159,8 +168,8 @@ async def handle_pass(bot: Bot, event: Event, args: Message = CommandArg()) -> N
     if problem is None:
         await pass_cmd.finish(f"当前没有 {source} {difficulty_key} 题目缓存。")
 
-    if not await is_group_admin_or_superuser(bot, event):
-        await pass_cmd.finish("只有管理员可以 /pass。")
+    if not (superuser or await is_group_admin(bot, event)):
+        await pass_cmd.finish()
 
     snapshot_key = problem_snapshot_key(difficulty_key, problem, source=source)
     if _is_reply_to_bot(bot, event):

@@ -25,15 +25,16 @@
 
 - `/ping`：检查机器人是否在线，返回 `pong`。
 - `/help`：查看当前指令和各难度 rating 区间。
-- `/giveup <cf|at> <难度>`：普通群成员两人投票放弃当前题；管理员和群管理可直接放弃。放弃后揭示原题名称、链接、rating 和简要题解，然后刷新下一题。仍兼容 `/random`、`随机题` 别名。
+- `/giveup <cf|at> <难度>`：在当前群 `algo:enable` 时可用，普通群成员按本群 `giveup:count` 投票放弃当前题；全局超管和本群群管理可直接放弃。放弃后揭示原题名称、链接、rating 和简要题解，然后刷新下一题。仍兼容 `/random`、`随机题` 别名。
 - `/add <uid>` / `/remove <uid>`：管理员维护黑名单，黑名单用户不能使用机器人指令。
 - `/del <uid>`：超级管理员删除某个用户在榜单中的所有数据。
-- `/cur <cf|at> <难度>`：重新发送当前难度的题面图片，避免题面被聊天记录刷走。
-- `/submit <cf|at> <难度> <题解描述>`：提交当前难度题目的题解描述，由 DeepSeek 进行思路评审，并更新本地 rating 与难度计数。
-- `/pass <cf|at> <难度>`：管理员或群管理回复用户提交消息，强制通过当前题；不能手动输入 uid，一血已产生时无效。
-- `/rank`：管理员和群管理查看全体成功解题用户排行榜；普通用户只能查看自己的排名卡片。图片包含头像、用户名、uid、CF/AT rating 和五档难度通过数。
-- `/emoji <表情或ID>`：超级管理员给本条消息贴同款 QQ 表情；如果引用某条消息，则只给被引用的消息贴表情。超级管理员单独发送一个 Unicode 表情或 QQ 表情时，也会视为调用 `/emoji`，并在 Unicode 表情贴成功后自动学习绑定。`/emoji 368` 这类数字会直接作为 NapCat 表情 ID 尝试贴上，不可用时返回“表情不可用”。超级管理员手动给某条消息贴表情时，机器人会尝试给同一条消息贴同款表情；失败时静默。`/emoji <表情>=<ID>` 可以绑定 Unicode 表情与贴表情 ID，`/emoji <表情>!=<ID>` 删除绑定；绑定左侧必须是单个 Unicode 表情，右侧必须全为数字，变体选择符会被规范化去重。未绑定 Unicode 表情会尝试用 Unicode 十进制码点作为 ID，贴成功后自动绑定。
-- `/emojilist`：超级管理员查看当前已绑定的 Unicode 表情，记录保存在 `data/emoji_reactions/bindings.json`，并按 Unicode 编码排序。不会自动学习 QQ 表情。
+- `/cur <cf|at> <难度>`：在当前群 `algo:enable` 时可用，重新发送当前难度的题面图片，避免题面被聊天记录刷走。
+- `/submit <cf|at> <难度> <题解描述>`：在当前群 `algo:enable` 时可用，提交当前难度题目的题解描述，由 DeepSeek 进行思路评审，并更新本地 rating 与难度计数。
+- `/pass <cf|at> <难度>`：在当前群 `algo:enable` 时，本群群管理或全局超管回复用户提交消息，强制通过当前题；不能手动输入 uid，一血已产生时无效。
+- `/rank`：在当前群 `algo:enable` 时可用；`rank:self` 时普通用户只能查看自己，`rank:all` 时全体可查看全体排行榜，本群群管理和全局超管始终可查看全体。图片包含头像、用户名、uid、CF/AT rating 和五档难度通过数。
+- `/emoji <表情或ID>`：在当前群 `emoji:enable` 时可用；全局超管任意时刻可用。给本条消息贴同款 QQ 表情；如果引用某条消息，则只给被引用的消息贴表情。群成员单独发送一个 Unicode 表情或 QQ 表情时，也会触发跟贴；全局超管发送 Unicode 表情且贴成功后会自动学习绑定。`/emoji 368` 这类数字会直接作为 NapCat 表情 ID 尝试贴上，不可用时返回“表情不可用”。手动给某条消息贴表情时，机器人会尝试给同一条消息贴同款表情；失败时静默。`/emoji <表情>=<ID>` 可以绑定 Unicode 表情与贴表情 ID，`/emoji <表情>!=<ID>` 删除绑定；绑定左侧必须是单个 Unicode 表情，右侧必须全为数字，变体选择符会被规范化去重。未绑定 Unicode 表情会尝试用 Unicode 十进制码点作为 ID，贴成功后自动绑定。
+- `/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable>`：超级管理员覆盖当前群配置。新群默认不可调用 bot，除全局超管外。
+- `/config`：超级管理员查看当前群配置。
 
 ## DeepSeek AI 评审 / 中文翻译 / LaTeX 公式渲染 启用说明
 
@@ -87,7 +88,7 @@ AT_RATING_IMPOSSIBLE=3000,inf
 NICKNAME=["AlgoQuest","算法练习"]
 ALGOQUEST_DISPLAY_NAME=AlgoQuest
 ALGOQUEST_USER_HELP_TEXT="{app_name}\n/ping - 检查机器人是否在线\n/cur <cf|at> <难度> - 重新发送当前题面\n/submit <cf|at> <难度> <题解描述> - 提交题解描述并由 AI 评审\n/giveup <cf|at> <难度> - 投票放弃当前题，两名群成员同意后刷新\n/rank - 查看自己的解题排行榜卡片\n/help - 查看当前指令"
-ALGOQUEST_ADMIN_HELP_TEXT="/giveup <cf|at> <难度> - 立即放弃当前题，揭示原题与简要题解，并刷新下一题\n/rank - 查看全体成员排行榜，群管理也可用\n/pass <cf|at> <难度> - 管理员回复用户提交消息，强制当前题通过并按 /submit 通过计分\n/add <uid> - 将用户加入黑名单\n/remove <uid> - 将用户移出黑名单\n/del <uid> - 超级管理员删除某个用户的榜单数据\n/emoji <表情或ID> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情；单独发送单个 Unicode/QQ 表情也会自动触发\n/emoji <表情>=<ID> / <表情>!=<ID> - 绑定或删除 Unicode 表情对应的贴表情 ID，未绑定时会尝试十进制码点并成功后自动绑定\n/emojilist - 超级管理员查看已绑定的 Unicode 表情"
+ALGOQUEST_ADMIN_HELP_TEXT="/giveup <cf|at> <难度> - 立即放弃当前题，揭示原题与简要题解，并刷新下一题\n/rank - 查看全体成员排行榜，群管理也可用\n/pass <cf|at> <难度> - 管理员回复用户提交消息，强制当前题通过并按 /submit 通过计分\n/add <uid> - 将用户加入黑名单\n/remove <uid> - 将用户移出黑名单\n/del <uid> - 超级管理员删除某个用户的榜单数据\n/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> - 超级管理员覆盖当前群配置\n/config - 超级管理员查看当前群配置\n/emoji <表情或ID> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情；单独发送单个 Unicode/QQ 表情也会自动触发\n/emoji <表情>=<ID> / <表情>!=<ID> - 超级管理员绑定或删除 Unicode 表情对应的贴表情 ID，未绑定时会尝试十进制码点并成功后自动绑定"
 ALGOQUEST_RANKLIST_TITLE="{app_name} Ranklist"
 ALGOQUEST_RANKLIST_SUBTITLE="Ranked by solved count: IMP/H/M/E/CI."
 ALGOQUEST_RANKLIST_FOOTER="Same solved vector shares rank; rating is shown as reference only."

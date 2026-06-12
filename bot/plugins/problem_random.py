@@ -5,13 +5,12 @@ import time
 from pathlib import Path
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, Event, GroupMessageEvent, Message, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, Event, Message, MessageEvent, MessageSegment
 from nonebot.log import logger
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 
 from bot.services.problem_random import (
-    DIFFICULTIES,
     DIFFICULTIES_BY_SOURCE,
     RenderedProblem,
     difficulty_usage,
@@ -22,7 +21,8 @@ from bot.services.problem_random import (
     read_problem_tutorial,
     warm_states_in_background,
 )
-from bot.services.permissions import get_event_user_id, is_group_admin_or_superuser, is_superuser
+from bot.services.group_config import algo_enabled_for_event, giveup_count_for_event, group_id_from_event
+from bot.services.permissions import get_event_user_id, is_group_admin, is_superuser
 
 
 __plugin_meta__ = PluginMetadata(
@@ -48,15 +48,21 @@ _GIVEUP_IMMUNITY_SECONDS = 5 * 60
 
 @giveup_cmd.handle()
 async def handle_giveup(bot: Bot, event: Event, args: Message = CommandArg()) -> None:
+    superuser = is_superuser(event)
+    if not superuser and not algo_enabled_for_event(event):
+        await giveup_cmd.finish()
+
     source, difficulty_key, _ = parse_source_difficulty_args(args.extract_plain_text(), require_source=True)
     if source is None or difficulty_key is None:
         await giveup_cmd.finish(difficulty_usage("/giveup"))
 
     difficulty = DIFFICULTIES_BY_SOURCE[source][difficulty_key]
     reply_prefix = _reply_to_event(event)
-    state_key = f"{source}:{difficulty_key}"
+    state_key = f"{group_id_from_event(event) or 'global'}:{source}:{difficulty_key}"
+    lock_key = f"{source}:{difficulty_key}"
     user_id = get_event_user_id(event) or "unknown"
-    privileged = await is_group_admin_or_superuser(bot, event)
+    required_votes = giveup_count_for_event(event)
+    privileged = superuser or await is_group_admin(bot, event)
 
     if not privileged:
         now = time.time()
@@ -76,18 +82,17 @@ async def handle_giveup(bot: Bot, event: Event, args: Message = CommandArg()) ->
         voters = _giveup_votes.setdefault(state_key, set())
         if user_id in voters:
             await giveup_cmd.finish(
-                reply_prefix
-                + MessageSegment.text(f"你已经投过本题放弃票了。当前 {len(voters)}/2。")
+                reply_prefix + MessageSegment.text(f"你已经投过本题放弃票了。当前 {len(voters)}/{required_votes}。")
             )
         voters.add(user_id)
-        if len(voters) < 2:
+        if len(voters) < required_votes:
             await giveup_cmd.finish(
                 reply_prefix
-                + MessageSegment.text(f"已记录放弃票。当前 {len(voters)}/2，需要另一名群成员同意。")
+                + MessageSegment.text(f"已记录放弃票。当前 {len(voters)}/{required_votes}。")
             )
 
     # Serialize requests for the same difficulty so only one render runs.
-    async with _busy_locks[state_key]:
+    async with _busy_locks[lock_key]:
         _giveup_running.add(state_key)
         _giveup_votes[state_key] = set()
         try:
@@ -120,6 +125,9 @@ async def handle_giveup(bot: Bot, event: Event, args: Message = CommandArg()) ->
 
 @cur_cmd.handle()
 async def handle_cur(bot: Bot, event: Event, args: Message = CommandArg()) -> None:
+    if not is_superuser(event) and not algo_enabled_for_event(event):
+        await cur_cmd.finish()
+
     source, difficulty_key, _ = parse_source_difficulty_args(args.extract_plain_text(), require_source=True)
     if source is None or difficulty_key is None:
         await cur_cmd.finish("用法：/cur <cf|at> <难度>\n\n" + difficulty_usage())
