@@ -82,13 +82,11 @@ AT_RATING_IMPOSSIBLE=3000,inf
 
 ### 个性化文案配置
 
-发布版默认使用 `AlgoQuest` 作为机器人英文名。所有本地个性化文案都可以放在 `.env` 中配置，避免改源码：
+发布版默认使用 `AlgoQuest` 作为机器人英文名。品牌名和榜单文案可以放在 `.env` 中配置，避免改源码；`/help` 会根据当前群配置自动生成，不再通过 `.env` 覆盖：
 
 ```env
 NICKNAME=["AlgoQuest","算法练习"]
 ALGOQUEST_DISPLAY_NAME=AlgoQuest
-ALGOQUEST_USER_HELP_TEXT="{app_name}\n/ping - 检查机器人是否在线\n/cur <cf|at> <难度> - 重新发送当前题面\n/submit <cf|at> <难度> <题解描述> - 提交题解描述并由 AI 评审\n/giveup <cf|at> <难度> - 投票放弃当前题，两名群成员同意后刷新\n/rank - 查看自己的解题排行榜卡片\n/help - 查看当前指令"
-ALGOQUEST_ADMIN_HELP_TEXT="/giveup <cf|at> <难度> - 立即放弃当前题，揭示原题与简要题解，并刷新下一题\n/rank - 查看全体成员排行榜，群管理也可用\n/pass <cf|at> <难度> - 管理员回复用户提交消息，强制当前题通过并按 /submit 通过计分\n/add <uid> - 将用户加入黑名单\n/remove <uid> - 将用户移出黑名单\n/del <uid> - 超级管理员删除某个用户的榜单数据\n/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> - 超级管理员覆盖当前群配置\n/config - 超级管理员查看当前群配置\n/emoji <表情或ID> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情；单独发送单个 Unicode/QQ 表情也会自动触发\n/emoji <表情>=<ID> / <表情>!=<ID> - 超级管理员绑定或删除 Unicode 表情对应的贴表情 ID，未绑定时会尝试十进制码点并成功后自动绑定"
 ALGOQUEST_RANKLIST_TITLE="{app_name} Ranklist"
 ALGOQUEST_RANKLIST_SUBTITLE="Ranked by solved count: IMP/H/M/E/CI."
 ALGOQUEST_RANKLIST_FOOTER="Same solved vector shares rank; rating is shown as reference only."

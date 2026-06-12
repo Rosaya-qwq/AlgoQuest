@@ -1,25 +1,27 @@
 from bot.services.group_config import GroupConfig
-from bot.services.help_text import ADMIN_HELP_TEXT, DEFAULT_USER_HELP_TEXT, group_help_text
+from bot.services.help_text import admin_help_text, group_help_text
 
 
 def test_user_help_does_not_include_admin_commands() -> None:
-    assert "/cur <cf|at> <难度>" not in DEFAULT_USER_HELP_TEXT
-    assert "/giveup <cf|at> <难度>" not in DEFAULT_USER_HELP_TEXT
-    assert "/random <难度>" not in DEFAULT_USER_HELP_TEXT
-    assert "/add <uid>" not in DEFAULT_USER_HELP_TEXT
-    assert "/remove <uid>" not in DEFAULT_USER_HELP_TEXT
-    assert "/emoji <表情" not in DEFAULT_USER_HELP_TEXT
-    assert "/emojilist" not in DEFAULT_USER_HELP_TEXT
+    text = group_help_text(GroupConfig())
+    assert "/cur <cf|at> <难度>" not in text
+    assert "/giveup <cf|at> <难度>" not in text
+    assert "/random <难度>" not in text
+    assert "/add <uid>" not in text
+    assert "/remove <uid>" not in text
+    assert "/emoji <表情" not in text
+    assert "/emojilist" not in text
 
 
 def test_admin_help_lists_admin_commands() -> None:
-    assert "/giveup <cf|at> <难度>" in ADMIN_HELP_TEXT
-    assert "/pass <cf|at> <难度>" in ADMIN_HELP_TEXT
-    assert "/add <uid>" in ADMIN_HELP_TEXT
-    assert "/remove <uid>" in ADMIN_HELP_TEXT
-    assert "/emoji <表情或ID>" in ADMIN_HELP_TEXT
-    assert "/init <algo:enable|disable>" in ADMIN_HELP_TEXT
-    assert "/emojilist" not in ADMIN_HELP_TEXT
+    text = admin_help_text()
+    assert "/giveup <cf|at> <难度>" in text
+    assert "/pass <cf|at> <难度>" in text
+    assert "/add <uid>" in text
+    assert "/remove <uid>" in text
+    assert "/emoji <表情或ID>" in text
+    assert "/init <algo:enable|disable>" in text
+    assert "/emojilist" not in text
 
 
 def test_group_help_respects_feature_flags() -> None:
