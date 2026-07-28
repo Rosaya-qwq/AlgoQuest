@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 from nonebot.log import logger
 
+from bot.services.paths import runtime_data_dir
 
-BLACKLIST_PATH = Path("data/blacklist/users.json")
+
+BLACKLIST_PATH = runtime_data_dir() / "blacklist/users.json"
 
 
 def normalize_uid(raw_uid: str) -> str | None:

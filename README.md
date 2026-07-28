@@ -68,6 +68,7 @@ DEEPSEEK_TRANSLATION_MODEL_IMPOSSIBLE=deepseek-v4-flash
 DEEPSEEK_TRANSLATION_ENABLED=true
 DEEPSEEK_TIMEOUT_SECONDS=900
 DEEPSEEK_MAX_TOKENS=24000
+ALGOQUEST_DATA_DIR=
 CF_RATING_CHECK_IN=0,1200
 CF_RATING_EASY=1200,1800
 CF_RATING_MEDIUM=1800,2400
@@ -79,6 +80,8 @@ AT_RATING_MEDIUM=1800,2400
 AT_RATING_HARD=2400,3000
 AT_RATING_IMPOSSIBLE=3000,inf
 ```
+
+`ALGOQUEST_DATA_DIR` 默认留空即可，此时运行数据固定存放在项目根目录的 `data/` 下，不受 systemd `WorkingDirectory` 影响。只有当你想把榜单、群配置、题目缓存等运行数据单独放到别的磁盘时，才需要填写绝对路径，例如 `/var/lib/algoquest`。
 
 ### 个性化文案配置
 
@@ -258,6 +261,8 @@ curl -I -L \
 ```
 
 如果还是 `403` 且响应头里有 `cf-mitigated: challenge`，说明当前服务器 IP 仍被 Cloudflare 拦截。此时仅有登录 Cookie 不够，需要在服务器上配置能访问 CF 的代理，或者换一个可用的 CF 题面镜像，并把镜像填到 `CODEFORCES_PROBLEM_PAGE_BASES` / `CODEFORCES_CONTEST_PAGE_BASES`。
+
+VJudge 当前不能直接当作无登录公开代理使用。未登录访问 `https://vjudge.net/problem/CodeForces-685E` 会跳转到登录页，`/origin` 也会回到 Codeforces 原题页并继续遇到 Cloudflare challenge。如果要通过 VJudge 兜底，需要先确认服务器上有可用的 VJudge 登录态 Cookie，并再单独接入 VJudge 登录后的题面接口或页面渲染。
 
 ## 本地运行手册
 

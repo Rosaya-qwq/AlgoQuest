@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 from nonebot.log import logger
 from PIL import Image, ImageDraw, ImageFont
 
+from bot.services.paths import runtime_data_dir
+
 _env_path = Path(".env")
 if _env_path.exists():
     load_dotenv(_env_path)
@@ -74,13 +76,14 @@ def _env_text(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
 
 
-CF_DATA_DIR = Path("data/codeforces")
-ATCODER_DATA_DIR = Path("data/atcoder")
+DATA_ROOT = runtime_data_dir()
+CF_DATA_DIR = DATA_ROOT / "codeforces"
+ATCODER_DATA_DIR = DATA_ROOT / "atcoder"
 DATA_DIR = CF_DATA_DIR
 PROBLEM_CACHE_PATH = CF_DATA_DIR / "problemset.json"
 ATCODER_CACHE_PATH = ATCODER_DATA_DIR / "problemset.json"
 LEGACY_ATCODER_CACHE_PATH = CF_DATA_DIR / "atcoder_problemset.json"
-RENDER_CACHE_VERSION_PATH = Path("data/render_cache_version.json")
+RENDER_CACHE_VERSION_PATH = DATA_ROOT / "render_cache_version.json"
 STATE_DIR = CF_DATA_DIR / "states"
 RENDERED_DIR = CF_DATA_DIR / "rendered"
 ATCODER_STATE_DIR = ATCODER_DATA_DIR / "states"

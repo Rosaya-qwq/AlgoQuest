@@ -4,15 +4,16 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 from nonebot.log import logger
 
+from bot.services.paths import runtime_data_dir
+
 
 _CQ_FACE_RE = re.compile(r"\[CQ:face,[^\]]*id=([^,\]]+)")
 _CQ_MFACE_RE = re.compile(r"\[CQ:(?:mface|image),[^\]]*emoji_id=([^,\]]+)")
-EMOJI_BINDINGS_PATH = Path("data/emoji_reactions/bindings.json")
+EMOJI_BINDINGS_PATH = runtime_data_dir() / "emoji_reactions/bindings.json"
 DEFAULT_TEXT_EMOJI_ID_BINDINGS = {
     "㊗️": "12951",
 }

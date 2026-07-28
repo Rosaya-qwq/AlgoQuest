@@ -3,14 +3,15 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 from nonebot.adapters.onebot.v11 import Event, GroupMessageEvent
 from nonebot.log import logger
 
+from bot.services.paths import runtime_data_dir
 
-GROUP_CONFIG_PATH = Path("data/group_config/groups.json")
+
+GROUP_CONFIG_PATH = runtime_data_dir() / "group_config/groups.json"
 
 RankMode = Literal["self", "all"]
 

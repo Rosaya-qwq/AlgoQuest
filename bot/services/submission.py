@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 from nonebot.log import logger
 
+from bot.services.paths import runtime_data_dir
 from bot.services.problem_random import DIFFICULTIES, DIFFICULTIES_BY_SOURCE, RenderedProblem
 from bot.services.deepseek import (
     _config,
@@ -21,7 +22,7 @@ from bot.services.deepseek import (
 )
 
 
-SUBMISSION_DIR = Path("data/submissions")
+SUBMISSION_DIR = runtime_data_dir() / "submissions"
 USER_STATS_PATH = SUBMISSION_DIR / "users.json"
 
 BASE_RATING = 0.0

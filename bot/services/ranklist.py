@@ -11,11 +11,12 @@ from PIL import Image, ImageDraw, ImageFont
 from nonebot.log import logger
 
 from bot.services.branding import app_name, env_template, env_text
+from bot.services.paths import runtime_data_dir
 from bot.services.problem_random import DIFFICULTIES
 from bot.services.submission import get_rank_entries, get_rank_entry_for_user
 
 
-RANKLIST_DIR = Path("data/submissions/ranklist")
+RANKLIST_DIR = runtime_data_dir() / "submissions/ranklist"
 
 WIDTH = 1180
 MARGIN = 42
