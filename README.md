@@ -1,6 +1,6 @@
 # AlgoQuest
 
-基于 NoneBot2 + NapCatQQ 的 QQ 机器人项目。提供 Codeforces / AtCoder 随机算法题与判题功能。
+基于 NoneBot2 + SnowLuma 的 QQ 机器人项目。提供 Codeforces / AtCoder 随机算法题与判题功能。
 
 ## 作者
 
@@ -32,7 +32,7 @@
 - `/submit <cf|at> <难度> <题解描述>`：在当前群 `algo:enable` 时可用，提交当前难度题目的题解描述，由 DeepSeek 进行思路评审，并更新本地 rating 与难度计数。
 - `/pass <cf|at> <难度>`：在当前群 `algo:enable` 时，本群群管理或全局超管回复用户提交消息，强制通过当前题；不能手动输入 uid，一血已产生时无效。
 - `/rank`：在当前群 `algo:enable` 时可用；`rank:self` 时普通用户只能查看自己，`rank:all` 时全体可查看全体排行榜，本群群管理和全局超管始终可查看全体。图片包含头像、用户名、uid、CF/AT rating 和五档难度通过数。
-- `/emoji <表情或ID>`：在当前群 `emoji:enable` 时可用；全局超管任意时刻可用。给本条消息贴同款 QQ 表情；如果引用某条消息，则只给被引用的消息贴表情。群成员单独发送一个 Unicode 表情或 QQ 表情时，也会触发跟贴；全局超管发送 Unicode 表情且贴成功后会自动学习绑定。`/emoji 368` 这类数字会直接作为 NapCat 表情 ID 尝试贴上，不可用时返回“表情不可用”。手动给某条消息贴表情时，机器人会尝试给同一条消息贴同款表情；失败时静默。`/emoji <表情>=<ID>` 可以绑定 Unicode 表情与贴表情 ID，`/emoji <表情>!=<ID>` 删除绑定；绑定左侧必须是单个 Unicode 表情，右侧必须全为数字，变体选择符会被规范化去重。未绑定 Unicode 表情会尝试用 Unicode 十进制码点作为 ID，贴成功后自动绑定。
+- `/emoji <表情或ID>`：在当前群 `emoji:enable` 时可用；全局超管任意时刻可用。给本条消息贴同款 QQ 表情；如果引用某条消息，则只给被引用的消息贴表情。群成员单独发送一个 Unicode 表情或 QQ 表情时，也会触发跟贴；全局超管发送 Unicode 表情且贴成功后会自动学习绑定。`/emoji 368` 这类数字会直接作为 SnowLuma / OneBot 表情回应 ID 尝试贴上，不可用时返回“表情不可用”。手动给某条消息贴表情时，机器人会尝试给同一条消息贴同款表情；失败时静默。`/emoji <表情>=<ID>` 可以绑定 Unicode 表情与贴表情 ID，`/emoji <表情>!=<ID>` 删除绑定；绑定左侧必须是单个 Unicode 表情，右侧必须全为数字，变体选择符会被规范化去重。未绑定 Unicode 表情会尝试用 Unicode 十进制码点作为 ID，贴成功后自动绑定。
 - `/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable>`：超级管理员覆盖当前群配置。新群默认不可调用 bot，除全局超管外。
 - `/config`：超级管理员查看当前群配置。
 
@@ -265,16 +265,18 @@ curl -I -L \
 
 本项目由两个进程组成：
 
-- NapCatQQ：负责登录 QQ、接收 QQ 消息、把消息按 OneBot V11 协议转发出来。
-- NoneBot2：负责运行我们的 Python 机器人逻辑，收到 `/ping`、`/giveup cf easy`、`/submit at check-in ...` 这类命令后返回结果。
+- SnowLuma：负责接入 QQ 会话，把 QQ 消息转换成 OneBot V11 动作与事件，并提供 WebUI 管理入口。
+- NoneBot2：负责运行本项目的 Python 机器人逻辑，收到 `/ping`、`/giveup cf easy`、`/submit at check-in ...` 这类命令后返回结果。
 
-也就是说，机器人 QQ 号不是登录到 NoneBot2 里，而是登录到 NapCatQQ 里。NoneBot2 只需要和 NapCatQQ 建立 OneBot V11 连接。
+也就是说，机器人 QQ 号不是登录到 NoneBot2 里，而是由 SnowLuma 接入 QQ 会话。NoneBot2 只需要和 SnowLuma 建立 OneBot V11 连接。
 
 本项目推荐使用反向 WebSocket：
 
 ```text
-QQ <-> NapCatQQ <-> ws://127.0.0.1:8080/onebot/v11/ws/ <-> NoneBot2
+QQ <-> SnowLuma <-> ws://127.0.0.1:8080/onebot/v11/ws/ <-> NoneBot2
 ```
+
+SnowLuma 官方仓库：https://github.com/SnowLuma/SnowLuma
 
 ### 2. 准备 NoneBot2 的运行环境
 
@@ -381,166 +383,85 @@ COMMAND_START=["/"]
 SUPERUSERS=["你的QQ号"]
 ```
 
-### 4. 启动 NapCatQQ
+如果你在 SnowLuma 的 OneBot 连接里配置 Access Token，`.env` 中也要设置完全相同的值：
 
-NapCatQQ 是独立程序，不在这个 Python 项目里。你需要先根据自己的系统安装并启动 NapCatQQ。
-
-推荐选择：
-
-- Windows 本地调试：使用 NapCat Windows 一键包，最省事。
-- Linux 本地或服务器：优先使用官方 Linux 一键脚本的 Shell 方式。
-- 已经熟悉 Docker：可以使用 Docker 方式，迁移和重启比较方便。
-
-#### 4.1 Windows 启动方式
-
-适合你在 Windows 桌面上先调试机器人。
-
-1. 打开 NapCatQQ Releases 页面：
-
-```text
-https://github.com/NapNeko/NapCatQQ/releases
+```env
+ONEBOT_V11_ACCESS_TOKEN=请换成强随机字符串
 ```
 
-2. 下载 Windows 一键包或 Shell 包。通常优先选：
+### 4. 启动 SnowLuma
+
+SnowLuma 是独立程序，不在这个 Python 项目里。它的作用是登录或接入 QQ 会话，并把 QQ 消息按 OneBot V11 协议转发给 NoneBot2。
+
+#### 4.1 下载发行包
+
+前往 SnowLuma Releases 页面下载与你服务器架构匹配的版本：
 
 ```text
-NapCat.Shell.Windows.OneKey.zip
+https://github.com/SnowLuma/SnowLuma/releases
 ```
 
-3. 解压到一个固定目录，例如：
+官方 README 中的命名规则如下：
 
 ```text
-D:\Bot\NapCatQQ
+Windows x64: SnowLuma-vX.Y.Z-win-x64.zip
+Linux x64:   SnowLuma-vX.Y.Z-linux-x64.tar.gz
+Linux arm64: SnowLuma-vX.Y.Z-linux-arm64.tar.gz
 ```
 
-4. 进入解压后的目录，先运行安装器或启动脚本。不同版本文件名可能略有变化，常见入口包括：
+优先下载完整版，完整版内置运行所需 Node.js；Lite 版需要你自己准备 Node.js 22+。
 
-```text
-NapCatInstaller.exe
-napcat.bat
+#### 4.2 Windows 启动方式
+
+解压发行包后，运行：
+
+```bat
 launcher.bat
-launcher-win10.bat
 ```
 
-5. 如果你使用 Shell 包，也可以用 QQ 号作为快速登录参数。这个参数只是告诉 NapCatQQ 要登录哪个账号，不是密码：
+保持启动窗口运行，然后打开 WebUI。
 
-```bat
-launcher.bat 123456789
+#### 4.3 Linux 启动方式
+
+解压发行包后进入目录：
+
+```bash
+chmod +x launcher.sh
+./launcher.sh
 ```
 
-Windows 10 可尝试：
+如果是无人值守服务器，并且你已经阅读并接受 SnowLuma 自身的协议和隐私条款，可以在启动前设置：
 
-```bat
-launcher-win10.bat 123456789
+```bash
+export SNOWLUMA_ACCEPT_EULA=1
+export SNOWLUMA_ACCEPT_PRIVACY=1
+./launcher.sh
 ```
 
-6. 启动后不要关闭窗口，观察终端日志。日志里会出现 WebUI 地址，通常类似：
+这两个变量只用于跳过 WebUI 的协议确认页面，不会写入持久化确认记录。
+
+### 5. 登录或接入机器人 QQ
+
+SnowLuma 启动后，浏览器打开：
 
 ```text
-http://127.0.0.1:6099/webui?token=xxxxxxxx
+http://127.0.0.1:5099
 ```
 
-7. 用浏览器打开这个 WebUI 地址，进入 QQ 登录页面，使用手机 QQ 扫码登录机器人 QQ。
-
-#### 4.2 Linux Shell 启动方式
-
-适合 Ubuntu、Debian、CentOS 等 Linux 系统，也是后续服务器部署最常用的方式。
-
-1. 安装基础工具：
-
-```bash
-sudo apt update
-sudo apt install -y curl ca-certificates
-```
-
-2. 下载并运行官方 Linux 一键脚本：
-
-```bash
-curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
-bash napcat.sh
-```
-
-3. 如果你希望进入可视化交互安装界面，可以用：
-
-```bash
-curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
-bash napcat.sh --tui
-```
-
-4. 如果你希望安装 Shell 方式并带 TUI-CLI 管理工具，可以用：
-
-```bash
-curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
-bash napcat.sh --docker n --cli y
-```
-
-5. 安装完成后，按照脚本输出启动 NapCatQQ。不同安装方式输出的启动命令可能不同，优先以安装脚本最后打印的命令为准。
-
-6. 如果安装了 TUI-CLI，可以尝试进入管理界面：
-
-```bash
-sudo napcat
-```
-
-7. 启动成功后查看终端日志，找到 WebUI 地址，通常类似：
+初始 WebUI 用户名是：
 
 ```text
-http://127.0.0.1:6099/webui?token=xxxxxxxx
+admin
 ```
 
-如果端口 `6099` 被占用，NapCatQQ 可能会自动尝试 `6100`、`6101` 等端口，实际地址以启动日志为准。
-
-#### 4.3 Linux Docker 启动方式
-
-适合你已经熟悉 Docker，或者希望后续迁移服务器时更容易复现环境。
-
-1. 确保服务器已安装 Docker。
-
-2. 使用官方安装脚本走 Docker 安装：
-
-```bash
-curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
-bash napcat.sh --docker y --qq "123456789" --mode ws --proxy 1 --confirm
-```
-
-把 `123456789` 换成机器人 QQ 号。
-
-3. Docker 方式下，NoneBot2 和 NapCatQQ 的地址要看它们是否在同一个网络里：
-
-- 如果 NoneBot2 跑在宿主机，NapCatQQ 容器要能访问宿主机的 `8080` 端口。
-- 如果 NoneBot2 和 NapCatQQ 都跑在 Docker Compose 同一网络里，反向 WebSocket 地址通常应写服务名，而不是 `127.0.0.1`。
-
-本项目当前先按本地非 Docker 的 NoneBot2 来配置，地址使用：
-
-```text
-ws://127.0.0.1:8080/onebot/v11/ws/
-```
-
-如果后续把 NoneBot2 也容器化，再单独调整这部分。
-
-### 5. 登录机器人 QQ
-
-NapCatQQ 启动后：
-
-1. 打开启动日志里显示的 WebUI 地址，例如：
-
-```text
-http://127.0.0.1:6099/webui?token=xxxxxxxx
-```
-
-2. 如果地址里没有带 token，就根据日志里的 token 登录；也可以查看 NapCatQQ 的 `webui.json` 配置文件。
-
-3. 进入 WebUI 后，找到 QQ 登录入口，选择二维码登录。
-
-4. 用手机 QQ 扫码，登录你准备用作机器人的 QQ 号。
-
-5. 登录成功后，让 NapCatQQ 进程保持运行。关闭 NapCatQQ 后，机器人 QQ 就不在线了。
+随机密码会打印在 SnowLuma 启动日志里。登录 WebUI 后，按 SnowLuma 页面提示接入已启动的 QQ 进程，并确认机器人 QQ 处于在线状态。
 
 注意事项：
 
 - 建议机器人使用单独 QQ 号，不要直接使用你的主力 QQ。
-- 第一次登录可能触发 QQ 设备验证或风控提示，需要按 QQ 客户端提示完成验证。
+- 第一次登录或接入可能触发 QQ 设备验证或风控提示，需要按 QQ 客户端提示完成验证。
 - `.env` 里的 `SUPERUSERS` 是机器人管理员 QQ 号，不是机器人登录账号。
+- SnowLuma 是第三方互操作项目，使用前应阅读其仓库中的 EULA / PRIVACY 说明。
 
 ### 6. 启动 NoneBot2
 
@@ -557,16 +478,20 @@ ws://127.0.0.1:8080/onebot/v11/ws/
 
 启动阶段会检查五个难度的 `cur_state` 和 `next_state` 题目缓存。已有有效缓存时直接复用；缺少缓存、图片文件丢失或 `RENDER_VERSION` 变化时才会重新抓题并完成 PNG 渲染。首次启动或缓存失效时会比普通启动更慢，观察日志中各难度的检查和补题耗时即可。
 
-### 7. 配置 NapCatQQ 连接 NoneBot2
+### 7. 配置 SnowLuma 连接 NoneBot2
 
-在 NapCatQQ 的 WebUI 中登录机器人 QQ 后，添加 OneBot V11 反向 WebSocket 连接：
+在 SnowLuma WebUI 中进入 OneBot 连接配置，添加 WebSocket 客户端，也就是反向 WebSocket：
 
-- 进入：网络配置 / OneBot 网络配置。
-- 新建连接。
-- 类型：WebSocket 客户端，也就是反向 WebSocket。
-- URL：`ws://127.0.0.1:8080/onebot/v11/ws/`
-- Access Token：本地调试可以先不填；如果填写，`.env` 中也要设置相同的 `ONEBOT_V11_ACCESS_TOKEN`
-- 保存时启用，或者保存后手动启用。
+```text
+ws://127.0.0.1:8080/onebot/v11/ws/
+```
+
+配置要点：
+
+- 连接类型选择 WebSocket Client / WebSocket 客户端 / 反向 WebSocket。不同版本 UI 文案可能略有差异。
+- Access Token 本地调试可以先不填；如果填写，`.env` 中也要设置相同的 `ONEBOT_V11_ACCESS_TOKEN`。
+- 保存后启用连接。
+- 如果 SnowLuma 和 NoneBot2 不在同一台机器上，URL 里的 `127.0.0.1` 要改成 NoneBot2 所在机器的可访问 IP 或域名。
 
 保存并启用后，QQ 中向机器人发送 `/ping`，如果返回 `pong`，说明链路已打通。
 
@@ -574,8 +499,8 @@ ws://127.0.0.1:8080/onebot/v11/ws/
 
 本地调试时建议按这个顺序来：
 
-1. 启动 NapCatQQ。
-2. 在 NapCatQQ WebUI 中确认机器人 QQ 已登录。
+1. 启动 SnowLuma。
+2. 在 SnowLuma WebUI 中确认机器人 QQ 已在线。
 3. 启动 NoneBot2：
 
 ```bash
@@ -583,7 +508,7 @@ source .venv/bin/activate
 python main.py
 ```
 
-4. 在 NapCatQQ WebUI 中启用反向 WebSocket。
+4. 在 SnowLuma WebUI 中启用 OneBot V11 反向 WebSocket。
 5. 用另一个 QQ 给机器人发：
 
 ```text
@@ -596,22 +521,22 @@ python main.py
 
 #### 看不到 WebUI 地址
 
-先看 NapCatQQ 启动窗口或日志。WebUI 地址通常会打印为：
+SnowLuma WebUI 默认地址是：
 
 ```text
-http://127.0.0.1:6099/webui?token=xxxxxxxx
+http://127.0.0.1:5099
 ```
 
-如果 `6099` 被占用，实际端口可能会变成 `6100` 或更高，必须以日志输出为准。
+如果打不开，先看 SnowLuma 启动日志，确认实际监听端口和随机管理员密码。
 
 #### WebUI 打不开
 
 检查：
 
-- NapCatQQ 进程是否还在运行。
+- SnowLuma 进程是否还在运行。
 - WebUI 地址和端口是否复制完整。
-- 本机浏览器访问本机 NapCatQQ 时使用 `127.0.0.1`。
-- 远程服务器上的 NapCatQQ 不要直接用本机浏览器访问服务器的 `127.0.0.1`，需要 SSH 隧道，见远程部署部分。
+- 本机浏览器访问本机 SnowLuma 时使用 `127.0.0.1`。
+- 远程服务器上的 SnowLuma 不要直接用本机浏览器访问服务器的 `127.0.0.1`，需要 SSH 隧道，见远程部署部分。
 
 #### 反向 WebSocket 连接失败
 
@@ -619,14 +544,14 @@ http://127.0.0.1:6099/webui?token=xxxxxxxx
 
 - NoneBot2 是否已经启动。
 - NoneBot2 日志里是否显示监听 `127.0.0.1:8080`。
-- NapCatQQ 里填写的 URL 是否完全是：
+- SnowLuma 里填写的 URL 是否完全是：
 
 ```text
 ws://127.0.0.1:8080/onebot/v11/ws/
 ```
 
-- 如果配置了 Token，NapCatQQ 和 `.env` 中的 Token 必须一致。
-- 如果 NapCatQQ 在 Docker 里，而 NoneBot2 在宿主机，`127.0.0.1` 可能指向容器自身，需要改成宿主机可访问地址。
+- 如果配置了 Token，SnowLuma 和 `.env` 中的 Token 必须一致。
+- 如果 SnowLuma 在容器里，而 NoneBot2 在宿主机，`127.0.0.1` 可能指向容器自身，需要改成宿主机可访问地址。
 
 #### QQ 发了 `/ping` 没反应
 
@@ -634,7 +559,7 @@ ws://127.0.0.1:8080/onebot/v11/ws/
 
 - 发送对象是不是机器人 QQ，而不是你自己的 QQ。
 - 机器人 QQ 是否仍然在线。
-- NapCatQQ 是否收到了消息。
+- SnowLuma 是否收到了消息。
 - NoneBot2 控制台是否有收到事件日志。
 - 命令前缀是否是 `/`，当前只配置了斜杠命令。
 
@@ -646,7 +571,7 @@ ws://127.0.0.1:8080/onebot/v11/ws/
 
 - Linux 服务器，推荐 Ubuntu 22.04/24.04 或 Debian 12。
 - Python 3.10+。
-- 可长期运行 NapCatQQ 的环境。
+- 可长期运行 SnowLuma 的环境。
 - 一个专门运行机器人的普通用户，不建议直接使用 `root` 长期运行。
 
 ### 2. 从零 SSH 连接服务器
@@ -743,30 +668,30 @@ ssh-keygen -R 1.2.3.4
 ssh root@1.2.3.4
 ```
 
-#### 2.5 通过 SSH 隧道打开 NapCatQQ WebUI
+#### 2.5 通过 SSH 隧道打开 SnowLuma WebUI
 
-服务器上的 NapCatQQ WebUI 通常只监听服务器自己的 `127.0.0.1:6099`。本机浏览器不能直接访问服务器的 `127.0.0.1`，需要开 SSH 端口转发：
+服务器上的 SnowLuma WebUI 通常只监听服务器自己的 `127.0.0.1:5099`。本机浏览器不能直接访问服务器的 `127.0.0.1`，需要开 SSH 端口转发：
 
 ```bash
-ssh -L 6099:127.0.0.1:6099 root@1.2.3.4
+ssh -L 5099:127.0.0.1:5099 root@1.2.3.4
 ```
 
 保持这个 SSH 窗口不要关闭，然后在本机浏览器打开：
 
 ```text
-http://127.0.0.1:6099/webui
+http://127.0.0.1:5099
 ```
 
-如果 NapCatQQ 日志里显示的端口不是 `6099`，例如 `6100`，就把两处端口都改成日志里的实际端口：
+如果 SnowLuma 日志里显示的端口不是 `5099`，就把两处端口都改成日志里的实际端口：
 
 ```bash
-ssh -L 6100:127.0.0.1:6100 root@1.2.3.4
+ssh -L 5100:127.0.0.1:5100 root@1.2.3.4
 ```
 
 如果服务器 SSH 端口不是 `22`，同时加 `-p`：
 
 ```bash
-ssh -p 2222 -L 6099:127.0.0.1:6099 root@1.2.3.4
+ssh -p 2222 -L 5099:127.0.0.1:5099 root@1.2.3.4
 ```
 
 ### 3. 上传项目
@@ -815,50 +740,43 @@ sudo .venv/bin/python -m playwright install-deps chromium
 sudo -u user /opt/AlgoQuest/.venv/bin/python -m playwright install chromium
 ```
 
-### 4. 在服务器安装并启动 NapCatQQ
+### 4. 在服务器安装并启动 SnowLuma
 
-如果服务器是 Ubuntu/Debian，推荐先使用 Linux Shell 方式：
+从 SnowLuma Releases 下载 Linux 发行包，推荐完整版：
 
-```bash
-sudo apt update
-sudo apt install -y curl ca-certificates
-curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
-bash napcat.sh --docker n --cli y
+```text
+https://github.com/SnowLuma/SnowLuma/releases
 ```
 
-安装完成后，优先按安装脚本输出的提示启动 NapCatQQ。如果安装了 TUI-CLI，可以尝试：
+上传或直接下载到服务器后，解压到固定目录，例如：
 
 ```bash
-sudo napcat
+sudo mkdir -p /opt/SnowLuma
+sudo tar -xzf SnowLuma-vX.Y.Z-linux-x64.tar.gz -C /opt/SnowLuma --strip-components=1
+cd /opt/SnowLuma
+chmod +x launcher.sh
 ```
 
-在管理界面里启动或管理机器人账号。
-
-如果你选择 Docker 方式，可以使用：
+启动：
 
 ```bash
-curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
-bash napcat.sh --docker y --qq "123456789" --mode ws --proxy 1 --confirm
+SNOWLUMA_ACCEPT_EULA=1 SNOWLUMA_ACCEPT_PRIVACY=1 ./launcher.sh
 ```
 
-把 `123456789` 换成机器人 QQ 号。
+如果你不想用环境变量跳过确认，就直接执行 `./launcher.sh`，然后进入 WebUI 完成确认。
 
-服务器启动 NapCatQQ 后，先确认三件事：
-
-- NapCatQQ 进程没有退出。
-- 日志里能看到 WebUI 地址和 token。
-- 机器人 QQ 可以在 WebUI 中扫码登录。
+建议后续也给 SnowLuma 单独做 systemd 服务或 tmux/screen 托管，确保 SSH 断开后进程不会退出。
 
 ### 5. 修改服务端配置
 
-如果 NapCatQQ 和 NoneBot2 在同一台服务器上，可以继续使用：
+如果 SnowLuma 和 NoneBot2 在同一台服务器上，可以继续使用：
 
 ```env
 HOST=127.0.0.1
 PORT=8080
 ```
 
-如果 NapCatQQ 在另一台机器上，需要让 NoneBot2 监听外部地址：
+如果 SnowLuma 在另一台机器上，需要让 NoneBot2 监听外部地址：
 
 ```env
 HOST=0.0.0.0
@@ -868,7 +786,7 @@ ONEBOT_V11_ACCESS_TOKEN=请换成强随机字符串
 
 同时在服务器安全组或防火墙中只放行必要来源 IP，避免把无 Token 的 OneBot 入口暴露到公网。
 
-### 6. 服务器 NapCatQQ 连接地址
+### 6. 服务器 SnowLuma 连接地址
 
 同机部署：
 
@@ -882,30 +800,30 @@ ws://127.0.0.1:8080/onebot/v11/ws/
 ws://服务器IP或域名:8080/onebot/v11/ws/
 ```
 
-跨机器部署时建议配置 Access Token，并确保 NapCatQQ 和 `.env` 中的 Token 一致。
+跨机器部署时建议配置 Access Token，并确保 SnowLuma 和 `.env` 中的 Token 一致。
 
-### 7. 服务器登录机器人 QQ
+### 7. 服务器接入机器人 QQ
 
-服务器上同样是 NapCatQQ 负责登录 QQ。常见流程是：
+服务器上同样是 SnowLuma 负责接入机器人 QQ。常见流程是：
 
-1. 在服务器启动 NapCatQQ。
-2. 查看 NapCatQQ 日志中的 WebUI 地址和 token。
+1. 在服务器启动 SnowLuma。
+2. 查看 SnowLuma 日志中的 WebUI 随机管理员密码。
 3. 如果 WebUI 只监听 `127.0.0.1`，可以用 SSH 端口转发在本机浏览器打开：
 
 ```bash
-ssh -L 6099:127.0.0.1:6099 user@server
+ssh -L 5099:127.0.0.1:5099 user@server
 ```
 
 然后访问：
 
 ```text
-http://127.0.0.1:6099/webui
+http://127.0.0.1:5099
 ```
 
-4. 在 WebUI 中扫码登录机器人 QQ。
+4. 在 WebUI 中接入机器人 QQ，并确认账号在线。
 5. 登录完成后，再添加并启用 OneBot V11 反向 WebSocket 连接。
 
-不要把 NapCatQQ WebUI 直接无保护暴露到公网；如果必须远程访问，至少使用防火墙、反向代理认证或 SSH 隧道。
+不要把 SnowLuma WebUI 直接无保护暴露到公网；如果必须远程访问，至少使用防火墙、反向代理认证或 SSH 隧道。
 
 ### 8. 使用 systemd 托管 NoneBot2
 
@@ -949,13 +867,56 @@ sudo systemctl status algoquest
 journalctl -u algoquest -f
 ```
 
-### 9. 服务器推荐启动顺序
+### 9. 使用 systemd 托管 SnowLuma
+
+如果你把 SnowLuma 放在 `/opt/SnowLuma`，可以创建服务文件：
+
+```bash
+sudo nano /etc/systemd/system/snowluma.service
+```
+
+填入：
+
+```ini
+[Unit]
+Description=SnowLuma QQ OneBot Bridge
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/SnowLuma
+ExecStart=/opt/SnowLuma/launcher.sh
+Restart=always
+RestartSec=5
+User=user
+Environment=SNOWLUMA_ACCEPT_EULA=1
+Environment=SNOWLUMA_ACCEPT_PRIVACY=1
+
+[Install]
+WantedBy=multi-user.target
+```
+
+把 `User=user` 换成实际运行用户。启用：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now snowluma
+sudo systemctl status snowluma
+```
+
+查看 SnowLuma 日志：
+
+```bash
+journalctl -u snowluma -f
+```
+
+### 10. 服务器推荐启动顺序
 
 服务器上建议按这个顺序确认：
 
-1. 启动 NapCatQQ。
-2. 通过 SSH 隧道打开 NapCatQQ WebUI。
-3. 扫码登录机器人 QQ。
+1. 启动 SnowLuma。
+2. 通过 SSH 隧道打开 SnowLuma WebUI。
+3. 接入机器人 QQ 并确认在线。
 4. 启动或重启 NoneBot2 systemd 服务：
 
 ```bash
@@ -963,15 +924,14 @@ sudo systemctl restart algoquest
 sudo systemctl status algoquest
 ```
 
-5. 在 NapCatQQ WebUI 中启用 OneBot V11 反向 WebSocket。
+5. 在 SnowLuma WebUI 中启用 OneBot V11 反向 WebSocket。
 6. 用另一个 QQ 发送 `/ping`。
-7. 如果没有返回，分别查看 NoneBot2 和 NapCatQQ 日志：
+7. 如果没有返回，分别查看 NoneBot2 和 SnowLuma 日志：
 
 ```bash
 journalctl -u algoquest -f
+journalctl -u snowluma -f
 ```
-
-NapCatQQ 的日志查看方式以你的安装方式为准；Shell/TUI 安装通常可以在管理界面或启动终端里查看，Docker 安装则使用对应容器日志。
 
 ## 后续功能开发约定
 
@@ -986,5 +946,5 @@ NapCatQQ 的日志查看方式以你的安装方式为准；Shell/TUI 安装通�
 
 - NoneBot2 文档：https://nonebot.dev/
 - NoneBot OneBot 适配器文档：https://onebot.adapters.nonebot.dev/
-- NapCatQQ 文档：https://napneko.github.io/
+- SnowLuma 文档与 Releases：https://github.com/SnowLuma/SnowLuma
 - AtCoder Problems API：https://github.com/kenkoooo/AtCoderProblems/blob/master/doc/api.md

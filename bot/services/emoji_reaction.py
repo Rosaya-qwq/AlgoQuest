@@ -32,7 +32,7 @@ class EmojiBindingValidation:
 
 
 def extract_emoji_id(message: Iterable[Any], *, allow_text: bool = True) -> str | None:
-    """Extract a NapCat set_msg_emoji_like emoji id from a message.
+    """Extract a OneBot set_msg_emoji_like emoji id from a message.
 
     QQ built-in faces use ``face.id``.  QQ mall/super expressions may arrive as
     ``mface.emoji_id`` or as an ``image`` segment carrying ``emoji_id``.
