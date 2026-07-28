@@ -193,12 +193,16 @@ ATCODER_API_REQUEST_INTERVAL_SECONDS=1.1
 CODEFORCES_PROBLEM_PAGE_BASES=https://codeforces.com/problemset/problem,https://mirror.codeforces.com/problemset/problem
 CODEFORCES_CONTEST_PAGE_BASES=https://codeforces.com/contest,https://mirror.codeforces.com/contest
 CODEFORCES_CLOUDSCRAPER_ENABLED=true
+VJUDGE_ENABLED=false
+VJUDGE_HTTP_TIMEOUT_SECONDS=60
 ```
 
 - `PROBLEM_FETCH_MAX_ROUNDS=0` 表示题面抓取/渲染失败后持续重试，直到抓到可用题目。
 - `PROBLEM_STARTUP_FETCH_MAX_ROUNDS=1` 表示启动时每档最多试一轮，避免 CF 主站/镜像不可用时卡住启动；启动后后台维护任务会继续补题。
 - `PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS` 控制后台补题间隔。缺题、图片丢失、题解为空或题解生成失败时，会在空闲时间反复尝试补齐。
 - `CODEFORCES_CLOUDSCRAPER_ENABLED=true` 表示普通 httpx 抓取 CF 题面失败后，再尝试使用 `cloudscraper` 处理 Cloudflare challenge。它不是万能的；如果 CF 的 challenge 需要真实浏览器交互或当前服务器 IP 被强拦，仍然需要代理或可用镜像。
+- `VJUDGE_ENABLED=true` 表示 CF 主站、镜像站和 cloudscraper 都抓取失败后，再用 VJudge 登录态抓取题面描述。VJudge 只作为 Codeforces 题面的最后兜底，不影响 AtCoder 随机池。
+- `VJUDGE_HTTP_TIMEOUT_SECONDS` 控制访问 VJudge 页面和题面描述接口的超时时间。
 - `PROBLEMSET_FETCH_RETRY_DELAY_SECONDS` 控制 CF/AT 题库 API 失败后的重试间隔。
 - `ATCODER_API_REQUEST_INTERVAL_SECONDS` 控制连续访问 AtCoder Problems API 的间隔，默认大于 1 秒。
 
@@ -224,8 +228,10 @@ scp atcoder-cookies.txt root@你的服务器:/home/AlgoQuest/secrets/atcoder-coo
 ```env
 CODEFORCES_COOKIES_FILE=/home/AlgoQuest/secrets/codeforces-cookies.txt
 ATCODER_COOKIES_FILE=/home/AlgoQuest/secrets/atcoder-cookies.txt
+VJUDGE_COOKIES_FILE=/home/AlgoQuest/secrets/vjudge-cookies.txt
 CODEFORCES_USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
 ATCODER_USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
+VJUDGE_USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
 ```
 
 方式二：Edge 不装插件，直接复制 Cookie 请求头
@@ -241,9 +247,14 @@ ATCODER_USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, li
 ```env
 CODEFORCES_COOKIE=JSESSIONID=xxx; 39ce7=xxx; cf_clearance=xxx
 ATCODER_COOKIE=REVEL_SESSION=xxx
+VJUDGE_COOKIE=JSESSIONID=xxx; JSESSlONID=xxx; cf_clearance=xxx
+VJUDGE_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0
+VJUDGE_ENABLED=true
 ```
 
 AtCoder 同理，打开 `https://atcoder.jp` 后复制请求里的 `Cookie`，填到 `ATCODER_COOKIE`。
+
+VJudge 同理，登录 `https://vjudge.net` 后复制文档请求里的 `Cookie`，填到 `VJUDGE_COOKIE`；再复制同一个请求的 `User-Agent`，填到 `VJUDGE_USER_AGENT`。VJudge 登录态会过期，过期后日志通常会出现“没有 dataJson”或跳转到登录页，此时重新复制 Cookie 即可。
 
 重启 bot：
 
@@ -262,7 +273,22 @@ curl -I -L \
 
 如果还是 `403` 且响应头里有 `cf-mitigated: challenge`，说明当前服务器 IP 仍被 Cloudflare 拦截。此时仅有登录 Cookie 不够，需要在服务器上配置能访问 CF 的代理，或者换一个可用的 CF 题面镜像，并把镜像填到 `CODEFORCES_PROBLEM_PAGE_BASES` / `CODEFORCES_CONTEST_PAGE_BASES`。
 
-VJudge 当前不能直接当作无登录公开代理使用。未登录访问 `https://vjudge.net/problem/CodeForces-685E` 会跳转到登录页，`/origin` 也会回到 Codeforces 原题页并继续遇到 Cloudflare challenge。如果要通过 VJudge 兜底，需要先确认服务器上有可用的 VJudge 登录态 Cookie，并再单独接入 VJudge 登录后的题面接口或页面渲染。
+验证 VJudge Cookie 是否有效：
+
+```bash
+curl -I -L \
+  -A "$VJUDGE_USER_AGENT" \
+  -H "Cookie: $VJUDGE_COOKIE" \
+  "https://vjudge.net/problem/CodeForces-685E"
+```
+
+如果返回登录页或 bot 日志提示 VJudge 页面没有 `dataJson`，说明 Cookie 无效、过期或复制不完整。VJudge 当前不能直接当作无登录公开代理使用；未登录访问 `https://vjudge.net/problem/CodeForces-685E` 会跳转到登录页，`/origin` 也会回到 Codeforces 原题页并继续遇到 Cloudflare challenge。
+
+本次更新：
+
+- 新增 `VJUDGE_ENABLED`、`VJUDGE_COOKIE`、`VJUDGE_COOKIES_FILE`、`VJUDGE_USER_AGENT`、`VJUDGE_HTTP_TIMEOUT_SECONDS`。
+- CF 题面抓取顺序为：Codeforces 主站、镜像站、contest 页面、cloudscraper、VJudge 登录态题面接口。
+- VJudge fallback 会把 VJudge 的分段题面 JSON 转成现有 CF 渲染器使用的 `.problem-statement`，并从 VJudge 页面读取时间限制、空间限制和 editorial 链接。
 
 ## 本地运行手册
 

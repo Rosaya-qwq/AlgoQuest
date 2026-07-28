@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import json
 import os
 import random
@@ -112,10 +113,15 @@ DEFAULT_HTTP_USER_AGENT = (
 )
 CODEFORCES_USER_AGENT = _env_text("CODEFORCES_USER_AGENT", DEFAULT_HTTP_USER_AGENT)
 ATCODER_USER_AGENT = _env_text("ATCODER_USER_AGENT", DEFAULT_HTTP_USER_AGENT)
+VJUDGE_USER_AGENT = _env_text("VJUDGE_USER_AGENT", CODEFORCES_USER_AGENT or DEFAULT_HTTP_USER_AGENT)
 CODEFORCES_COOKIE = _env_text("CODEFORCES_COOKIE")
 ATCODER_COOKIE = _env_text("ATCODER_COOKIE")
+VJUDGE_COOKIE = _env_text("VJUDGE_COOKIE")
 CODEFORCES_COOKIES_FILE = _env_text("CODEFORCES_COOKIES_FILE")
 ATCODER_COOKIES_FILE = _env_text("ATCODER_COOKIES_FILE")
+VJUDGE_COOKIES_FILE = _env_text("VJUDGE_COOKIES_FILE")
+VJUDGE_ENABLED = _env_text("VJUDGE_ENABLED", "false").lower() in {"1", "true", "yes", "enabled"}
+VJUDGE_HTTP_TIMEOUT_SECONDS = _env_float("VJUDGE_HTTP_TIMEOUT_SECONDS", 60.0)
 
 CODEFORCES_API_PROBLEMSET = "https://codeforces.com/api/problemset.problems"
 ATCODER_PROBLEMS_API = "https://kenkoooo.com/atcoder/resources/merged-problems.json"
@@ -214,6 +220,13 @@ def _request_headers_for_source(source: str) -> dict[str, str]:
             direct_cookie=ATCODER_COOKIE,
             cookie_file=ATCODER_COOKIES_FILE,
             domain_hint="atcoder.jp",
+        )
+    elif source == "vjudge":
+        user_agent = VJUDGE_USER_AGENT
+        cookie = _cookie_header(
+            direct_cookie=VJUDGE_COOKIE,
+            cookie_file=VJUDGE_COOKIES_FILE,
+            domain_hint="vjudge.net",
         )
     else:
         user_agent = CODEFORCES_USER_AGENT
@@ -1177,10 +1190,208 @@ async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) ->
             except Exception as exc:  # noqa: BLE001 - best-effort Cloudflare fallback.
                 last_error = exc
                 logger.warning(f"cloudscraper failed for {url}: {exc}")
+    if VJUDGE_ENABLED:
+        try:
+            return await _fetch_codeforces_html_from_vjudge(client, problem)
+        except Exception as exc:  # noqa: BLE001 - VJudge is the final fallback.
+            last_error = exc
+            logger.warning(f"VJudge fallback failed for Codeforces problem {problem.key}: {exc}", exc_info=True)
     raise RuntimeError(
         "无法获取题面 HTML；可能是 Codeforces Cloudflare challenge、镜像站 503，"
         f"或服务器网络无法访问。已尝试：{', '.join(attempted_urls)}；最后错误：{last_error}"
     ) from last_error
+
+
+async def _fetch_codeforces_html_from_vjudge(client: httpx.AsyncClient, problem: ProblemRef) -> str:
+    problem_code = f"{problem.contest_id}{problem.index}"
+    page_url = f"https://vjudge.net/problem/CodeForces-{problem_code}"
+    headers = _request_headers_for_source("vjudge")
+    response = await client.get(page_url, headers=headers, timeout=VJUDGE_HTTP_TIMEOUT_SECONDS)
+    response.raise_for_status()
+    page_data = _parse_vjudge_problem_page(response.text)
+    description_url = page_data.description_url
+    description_response = await client.get(
+        description_url,
+        headers=headers,
+        timeout=VJUDGE_HTTP_TIMEOUT_SECONDS,
+    )
+    description_response.raise_for_status()
+    html = _vjudge_description_to_problem_html(
+        description_response.text,
+        title=problem.name,
+        page_data=page_data,
+    )
+    if "problem-statement" not in html:
+        raise RuntimeError(f"VJudge 描述页中没有可转换题面：{description_url}")
+    logger.info(f"Fetched Codeforces problem {problem.key} from VJudge fallback")
+    return html
+
+
+@dataclass(frozen=True)
+class VJudgeProblemPage:
+    problem_url: str
+    description_url: str
+    time_limit: str = ""
+    memory_limit: str = ""
+    editorial_html: str = ""
+
+
+def _parse_vjudge_problem_page(html: str) -> VJudgeProblemPage:
+    soup = BeautifulSoup(html, "html.parser")
+    textarea = soup.find("textarea", attrs={"name": "dataJson"})
+    if textarea is None:
+        raise RuntimeError("VJudge 页面中没有 dataJson，可能登录态失效")
+    try:
+        payload = json.loads(textarea.string or textarea.get_text())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("VJudge dataJson 解析失败") from exc
+
+    desc_briefs = payload.get("descBriefs")
+    if not isinstance(desc_briefs, list) or not desc_briefs:
+        raise RuntimeError("VJudge 页面中没有题面描述 brief")
+    desc = _select_vjudge_description_brief(desc_briefs)
+
+    system_version_node = soup.find("input", attrs={"name": "systemVersion"})
+    system_version = _to_int((system_version_node or {}).get("value"), 0)
+    key = _to_int(desc.get("key"), 0)
+    version = _to_int(desc.get("version"), 0)
+    if key <= 0:
+        raise RuntimeError("VJudge 题面描述 key 缺失")
+
+    properties = _vjudge_properties(payload.get("properties"))
+    return VJudgeProblemPage(
+        problem_url=str(payload.get("prob") or ""),
+        description_url=f"https://vjudge.net/problem/description/{key}?{version + system_version}",
+        time_limit=properties.get("time_limit", ""),
+        memory_limit=properties.get("mem_limit", ""),
+        editorial_html=properties.get("editorial", ""),
+    )
+
+
+def _select_vjudge_description_brief(desc_briefs: list[Any]) -> dict[str, Any]:
+    dicts = [item for item in desc_briefs if isinstance(item, dict)]
+    for item in dicts:
+        if item.get("mainOfficial") and str(item.get("lang", "")).lower() == "en":
+            return item
+    for item in dicts:
+        if item.get("official") and str(item.get("lang", "")).lower() == "en":
+            return item
+    for item in dicts:
+        if str(item.get("lang", "")).lower() == "en":
+            return item
+    if dicts:
+        return dicts[0]
+    raise RuntimeError("VJudge 题面描述 brief 格式无效")
+
+
+def _vjudge_properties(raw_properties: Any) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if not isinstance(raw_properties, list):
+        return result
+    for item in raw_properties:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if title:
+            result[title] = content
+    return result
+
+
+def _to_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _vjudge_description_to_problem_html(description_html: str, *, title: str, page_data: VJudgeProblemPage) -> str:
+    soup = BeautifulSoup(description_html, "html.parser")
+    textarea = soup.find("textarea", class_="data-json-container")
+    if textarea is None:
+        raise RuntimeError("VJudge 描述页中没有 data-json-container")
+    try:
+        payload = json.loads(textarea.string or textarea.get_text())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("VJudge 描述页 JSON 解析失败") from exc
+    sections = payload.get("sections")
+    if not isinstance(sections, list) or not sections:
+        raise RuntimeError("VJudge 描述页没有 sections")
+
+    body_parts: list[str] = []
+    sample_parts: list[str] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        section_title = _clean_text(str(section.get("title") or ""))
+        value = section.get("value")
+        content = ""
+        if isinstance(value, dict):
+            content = str(value.get("content") or "")
+        if not content:
+            continue
+        if section_title.lower() in {"example", "examples", "sample", "samples"}:
+            sample_parts.extend(_vjudge_samples_to_cf_html(content))
+            continue
+        if section_title:
+            body_parts.append(f'<div><div class="section-title">{html_lib.escape(section_title)}</div>{content}</div>')
+        else:
+            body_parts.append(f"<div>{content}</div>")
+
+    header = (
+        '<div class="header">'
+        f'<div class="title">{html_lib.escape(title)}</div>'
+        f'<div class="time-limit"><div class="property-title">time limit per test</div>{html_lib.escape(page_data.time_limit)}</div>'
+        f'<div class="memory-limit"><div class="property-title">memory limit per test</div>{html_lib.escape(page_data.memory_limit)}</div>'
+        "</div>"
+    )
+    samples = f'<div class="sample-test">{"".join(sample_parts)}</div>' if sample_parts else ""
+    editorial = f'<div class="vjudge-editorial-links">{page_data.editorial_html}</div>' if page_data.editorial_html else ""
+    return f'<html><body><div class="problem-statement">{header}{"".join(body_parts)}{samples}</div>{editorial}</body></html>'
+
+
+def _vjudge_samples_to_cf_html(content: str) -> list[str]:
+    soup = BeautifulSoup(content, "html.parser")
+    rows = soup.select("table.vjudge_sample tbody tr") or soup.select("tr")
+    samples: list[str] = []
+    for row in rows:
+        cells = row.find_all(["td", "th"], recursive=False)
+        if len(cells) < 2:
+            continue
+        input_text = _pre_text(cells[0].find("pre") or cells[0])
+        output_text = _pre_text(cells[1].find("pre") or cells[1])
+        if not input_text and not output_text:
+            continue
+        samples.append(
+            '<div class="input"><div class="title">Input</div>'
+            f"<pre>{html_lib.escape(input_text)}</pre></div>"
+            '<div class="output"><div class="title">Output</div>'
+            f"<pre>{html_lib.escape(output_text)}</pre></div>"
+        )
+    if samples:
+        return samples
+
+    input_node = soup.find(class_="input") or soup.find("pre")
+    output_node = soup.find(class_="output")
+    if input_node is None and output_node is None:
+        return []
+    input_text = _vjudge_sample_node_text(input_node)
+    output_text = _vjudge_sample_node_text(output_node)
+    return [
+        '<div class="input"><div class="title">Input</div>'
+        f"<pre>{html_lib.escape(input_text)}</pre></div>"
+        '<div class="output"><div class="title">Output</div>'
+        f"<pre>{html_lib.escape(output_text)}</pre></div>"
+    ]
+
+
+def _vjudge_sample_node_text(node: Tag | None) -> str:
+    if node is None:
+        return ""
+    pre = node.find("pre")
+    if pre is not None:
+        return _pre_text(pre)
+    return _clean_text(node.get_text("\n"))
 
 
 async def _fetch_problem_html_with_cloudscraper(url: str) -> str:

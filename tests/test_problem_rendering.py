@@ -355,6 +355,57 @@ def test_request_headers_use_env_cookie(monkeypatch) -> None:
     assert headers["Cookie"] == "a=b; c=d"
 
 
+def test_vjudge_description_converts_to_codeforces_problem_html() -> None:
+    page_html = """
+    <html><body>
+      <input name="systemVersion" value="20">
+      <textarea name="dataJson">
+      {
+        "prob": "CodeForces-1A",
+        "descBriefs": [
+          {"key": 100, "version": 7, "lang": "en", "official": true, "mainOfficial": true}
+        ],
+        "properties": [
+          {"title": "time_limit", "content": "2 seconds"},
+          {"title": "mem_limit", "content": "256 megabytes"},
+          {"title": "editorial", "content": "<a href=\\"https://codeforces.com/blog/entry/1\\">Tutorial</a>"}
+        ]
+      }
+      </textarea>
+    </body></html>
+    """
+    description_html = """
+    <html><body>
+      <textarea class="data-json-container">
+      {
+        "sections": [
+          {"title": "", "value": {"format": "HTML", "content": "<p>Main statement.</p>"}},
+          {"title": "Input", "value": {"format": "HTML", "content": "<p>Input text.</p>"}},
+          {"title": "Examples", "value": {"format": "HTML", "content": "<table class='vjudge_sample'><tbody><tr><td><pre>1 2</pre></td><td><pre>3</pre></td></tr></tbody></table>"}}
+        ]
+      }
+      </textarea>
+    </body></html>
+    """
+
+    page_data = problem_random._parse_vjudge_problem_page(page_html)
+    html = problem_random._vjudge_description_to_problem_html(
+        description_html,
+        title="Theatre Square",
+        page_data=page_data,
+    )
+    blocks, samples, _, limits = _parse_problem_html(html, "https://codeforces.com/problemset/problem/1/A")
+
+    assert page_data.description_url == "https://vjudge.net/problem/description/100?27"
+    assert limits == {"time_limit": "2 s", "memory_limit": "256 MB"}
+    assert {"type": "paragraph", "text": "Main statement."} in blocks
+    assert {"type": "heading", "text": "Input"} in blocks
+    assert samples == [{"input": "1 2", "output": "3"}]
+    assert _extract_tutorial_url(html, "https://codeforces.com/problemset/problem/1/A") == (
+        "https://codeforces.com/blog/entry/1"
+    )
+
+
 def test_move_notes_after_samples_keeps_notes_for_the_end() -> None:
     statement, notes = _move_notes_after_samples(
         [
@@ -758,6 +809,64 @@ def test_fetch_problem_html_uses_cloudscraper_fallback(monkeypatch) -> None:
     )
 
     assert "problem-statement" in html
+
+
+def test_fetch_problem_html_uses_vjudge_fallback(monkeypatch) -> None:
+    class Response:
+        def __init__(self, text: str = "", fail: bool = False) -> None:
+            self.text = text
+            self.fail = fail
+
+        def raise_for_status(self) -> None:
+            if self.fail:
+                raise RuntimeError("403 challenge")
+
+    vjudge_page = """
+    <html><body>
+      <input name="systemVersion" value="1">
+      <textarea name="dataJson">
+      {
+        "prob": "CodeForces-1A",
+        "descBriefs": [{"key": 9, "version": 10, "lang": "en", "official": true, "mainOfficial": true}],
+        "properties": [{"title": "time_limit", "content": "1 second"}, {"title": "mem_limit", "content": "64 megabytes"}]
+      }
+      </textarea>
+    </body></html>
+    """
+    vjudge_description = """
+    <html><body>
+      <textarea class="data-json-container">
+      {"sections": [{"title": "", "value": {"format": "HTML", "content": "<p>Fallback statement.</p>"}}]}
+      </textarea>
+    </body></html>
+    """
+
+    class Client:
+        async def get(self, url: str, **kwargs):
+            if url == "https://vjudge.net/problem/CodeForces-1A":
+                assert kwargs["headers"]["User-Agent"] == "VJudge UA"
+                return Response(vjudge_page)
+            if url == "https://vjudge.net/problem/description/9?11":
+                return Response(vjudge_description)
+            return Response(fail=True)
+
+    monkeypatch.setattr(problem_random, "CODEFORCES_CLOUDSCRAPER_ENABLED", False)
+    monkeypatch.setattr(problem_random, "VJUDGE_ENABLED", True)
+    monkeypatch.setattr(problem_random, "VJUDGE_USER_AGENT", "VJudge UA")
+    monkeypatch.setattr(problem_random, "VJUDGE_COOKIE", "vj=a")
+    monkeypatch.setattr(problem_random, "VJUDGE_COOKIES_FILE", "")
+
+    html = asyncio.run(
+        problem_random._fetch_problem_html(
+            Client(),
+            ProblemRef(contest_id=1, index="A", name="Theatre Square", rating=800, tags=[]),
+        )
+    )
+
+    blocks, samples, _, limits = _parse_problem_html(html, "https://codeforces.com/problemset/problem/1/A")
+    assert {"type": "paragraph", "text": "Fallback statement."} in blocks
+    assert samples == []
+    assert limits == {"time_limit": "1 s", "memory_limit": "64 MB"}
 
 
 def test_fetch_tutorial_text_uses_cloudscraper_fallback(monkeypatch) -> None:
