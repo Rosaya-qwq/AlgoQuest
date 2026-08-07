@@ -584,6 +584,85 @@ ws://127.0.0.1:8080/onebot/v11/ws/
 - 如果配置了 Token，SnowLuma 和 `.env` 中的 Token 必须一致。
 - 如果 SnowLuma 在容器里，而 NoneBot2 在宿主机，`127.0.0.1` 可能指向容器自身，需要改成宿主机可访问地址。
 
+#### SnowLuma 提示 `PTRACE_ATTACH ... Operation not permitted`
+
+这表示 SnowLuma 已经找到 QQ 进程，但 Linux 内核拒绝了 Hook 注入。最常见于 SnowLuma 通过 systemd 启动时没有 `CAP_SYS_PTRACE` 权限，或者 QQ 与 SnowLuma 不是同一个 Linux 用户运行。
+
+先确认 QQ 和 SnowLuma 的运行用户。下面的 `814` 替换为日志里的 QQ PID：
+
+```bash
+ps -eo user,pid,ppid,cmd | grep -Ei 'qq|snowluma|launcher|node' | grep -v grep
+ps -o pid,ppid,user,euser,group,cmd -p 814
+```
+
+QQ、SnowLuma 和启动脚本建议都使用同一个普通用户，例如 `ubuntu`，不要一会儿用 `sudo`、一会儿用普通用户启动。修改服务中的 `User`、`Group` 和路径后，确保 SnowLuma 目录可写：
+
+```bash
+sudo chown -R ubuntu:ubuntu /home/ubuntu/SnowLuma
+sudo chmod -R u+rwX /home/ubuntu/SnowLuma
+sudo chmod +x /home/ubuntu/SnowLuma/launcher.sh
+```
+
+如果使用下方的 systemd 服务示例，它已经包含最小的 `CAP_SYS_PTRACE` 权限：
+
+```ini
+AmbientCapabilities=CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_SYS_PTRACE
+```
+
+修改服务后重新加载并重启：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart snowluma
+sudo journalctl -u snowluma -f
+```
+
+如果服务文件中存在下面这一项，请删除或改为 `false`，否则可能禁止 capability 生效：
+
+```ini
+NoNewPrivileges=true
+```
+
+仍然失败时，检查系统的 Yama ptrace 限制：
+
+```bash
+cat /proc/sys/kernel/yama/ptrace_scope
+```
+
+可以先临时放开限制验证问题：
+
+```bash
+sudo sysctl -w kernel.yama.ptrace_scope=0
+sudo systemctl restart snowluma
+```
+
+确认确实是该限制导致后，如需永久保留：
+
+```bash
+sudo nano /etc/sysctl.d/99-snowluma-ptrace.conf
+```
+
+写入：
+
+```conf
+kernel.yama.ptrace_scope = 0
+```
+
+应用配置：
+
+```bash
+sudo sysctl --system
+```
+
+成功后 SnowLuma 日志应重新出现：
+
+```text
+[Hook] pipe connected: PID=...
+```
+
+如果 QQ 或 SnowLuma 运行在 Docker 容器中，还需要在创建容器时增加 `SYS_PTRACE` capability；仅修改宿主机的 `ptrace_scope` 可能不够。
+
 #### QQ 发了 `/ping` 没反应
 
 检查：
@@ -915,19 +994,23 @@ After=network.target
 
 [Service]
 Type=simple
+User=ubuntu
+Group=ubuntu
 WorkingDirectory=/opt/SnowLuma
 ExecStart=/opt/SnowLuma/launcher.sh
 Restart=always
 RestartSec=5
-User=user
+Environment=HOME=/home/ubuntu
 Environment=SNOWLUMA_ACCEPT_EULA=1
 Environment=SNOWLUMA_ACCEPT_PRIVACY=1
+AmbientCapabilities=CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_SYS_PTRACE
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-把 `User=user` 换成实际运行用户。启用：
+把 `ubuntu`、`/home/ubuntu` 和 `/opt/SnowLuma` 换成你的实际用户及安装路径。QQ 和 SnowLuma 必须使用同一个 Linux 用户运行；如果服务中配置了 `NoNewPrivileges=true`，请删除该行。启用：
 
 ```bash
 sudo systemctl daemon-reload
