@@ -143,6 +143,7 @@ DEEPSEEK_TRANSLATION_ENABLED=true # 设为 true 启用题面中文翻译
 - API 调用失败时自动回退为原始题面，不影响 `/giveup` 正常使用
 - 所有 DeepSeek 调用共用一个异步锁；同一时刻只会发送一个翻译、题解或判题请求，适合 2 核 2G 服务器。
 - 翻译、判题和题解在全部难度下统一使用 `deepseek-flash`。旧配置中的 `deepseek-v4-flash` 和 `deepseek-v4-pro` 会自动映射到新模型名，仍建议同步更新服务器 `.env`。
+- `DEEPSEEK_BASE_URL` 留空时自动使用 `https://api.deepseek.com`；填写自定义地址时必须包含 `http://` 或 `https://`，且只填写 API 根地址，不要追加 `/chat/completions`。
 
 **首次启用翻译后**，旧缓存题目仍是英文的。执行以下命令清除缓存：
 
@@ -202,7 +203,8 @@ PROBLEM_HTTP_PROXY=
 
 - `PROBLEM_FETCH_MAX_ROUNDS=0` 表示题面抓取/渲染失败后持续重试，直到抓到可用题目。
 - `PROBLEM_STARTUP_FETCH_MAX_ROUNDS=1` 表示启动时每档最多试一轮，避免 CF 主站/镜像不可用时卡住启动；启动后后台维护任务会继续补题。
-- `PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS` 控制后台补题间隔。缺题、图片丢失、题解为空或题解生成失败时，会在空闲时间反复尝试补齐。
+- `PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS` 控制后台补题间隔。只有题目槽位缺失、题面文本为空或 PNG 文件丢失时，后台才会重新抓取并渲染题目。
+- 后台维护只会补充缺失或损坏的题面缓存。简要题解 `ai_brief` 属于可选数据，生成失败不会删除题面、换题或在每轮维护中重复调用 DeepSeek，以免配置错误时持续消耗 API 额度。
 - `CODEFORCES_CLOUDSCRAPER_ENABLED=true` 表示普通 httpx 抓取 CF 题面失败后，再尝试使用 `cloudscraper` 处理 Cloudflare challenge。它不是万能的；如果 CF 的 challenge 需要真实浏览器交互或当前服务器 IP 被强拦，仍然需要代理或可用镜像。
 - `LUOGU_ENABLED=true` 表示 CF/AtCoder 主站题面抓取失败后，尝试解析洛谷搬运页。CF 的回退顺序为主站/镜像/cloudscraper -> 洛谷 -> VJudge，AtCoder 为主站 -> 洛谷。洛谷题面页是公开页面，不需要账号或 Cookie。
 - `LUOGU_HTTP_TIMEOUT_SECONDS` 控制单次洛谷题面请求超时。洛谷可能尚未搬运新题；页面不存在、数据为空或解析失败时，该候选会被跳过，随机池自动换一道题继续抓取。

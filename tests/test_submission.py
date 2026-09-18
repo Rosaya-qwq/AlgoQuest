@@ -698,6 +698,27 @@ def test_submission_default_model_is_flash() -> None:
     assert submission.DEFAULT_SUBMISSION_MODEL == "deepseek-flash"
 
 
+def test_deepseek_base_url_empty_value_uses_official_default(monkeypatch) -> None:
+    from bot.services.deepseek import deepseek_base_url
+
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "")
+
+    assert deepseek_base_url() == "https://api.deepseek.com"
+
+
+def test_deepseek_base_url_requires_http_protocol(monkeypatch) -> None:
+    from bot.services.deepseek import deepseek_base_url
+
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "api.deepseek.com")
+
+    try:
+        deepseek_base_url()
+    except RuntimeError as exc:
+        assert "http:// 或 https://" in str(exc)
+    else:
+        raise AssertionError("base URL without protocol should be rejected")
+
+
 def test_rank_entries_include_solved_counts(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(submission, "USER_STATS_PATH", tmp_path / "users.json")
     submission._save_stats(

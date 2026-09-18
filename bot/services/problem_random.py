@@ -3493,10 +3493,9 @@ def _is_complete_rendered_problem(problem: RenderedProblem | None) -> bool:
         return False
     if not problem.statement_text.strip():
         return False
-    if not problem.ai_brief.strip():
-        return False
-    if problem.ai_brief.strip().startswith(("简要题解生成失败", "未配置 DEEPSEEK_API_KEY")):
-        return False
+    # A solution brief is optional metadata. Treating an empty/failed brief as
+    # an invalid render makes maintenance delete a valid problem and repeatedly
+    # call the AI API while rebuilding it.
     return Path(problem.statement_image).exists()
 
 

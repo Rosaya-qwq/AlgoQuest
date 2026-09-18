@@ -16,6 +16,7 @@ from bot.services.problem_random import DIFFICULTIES, DIFFICULTIES_BY_SOURCE, Re
 from bot.services.deepseek import (
     _config,
     deepseek_api_lock,
+    deepseek_base_url,
     deepseek_max_tokens,
     deepseek_model_for,
     deepseek_timeout_seconds,
@@ -446,7 +447,7 @@ def problem_snapshot_key(difficulty_key: str, problem: RenderedProblem, source: 
 
 async def _chat_for_submission(prompt: str, *, difficulty_key: str = "") -> str:
     api_key = _config("DEEPSEEK_API_KEY")
-    base_url = _config("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+    base_url = deepseek_base_url()
     model = deepseek_model_for("judge", difficulty_key, DEFAULT_SUBMISSION_MODEL)
     headers = {
         "Authorization": f"Bearer {api_key}",

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from dotenv import load_dotenv
@@ -54,6 +55,19 @@ def deepseek_max_tokens(default: int = DEFAULT_MAX_TOKENS) -> int:
         return max(1024, int(_config(DEEPSEEK_MAX_TOKENS, str(default))))
     except ValueError:
         return default
+
+
+def deepseek_base_url() -> str:
+    """Return a normalized HTTP(S) API root and reject malformed configuration."""
+    base_url = _config(DEEPSEEK_BASE_URL, "").strip() or "https://api.deepseek.com"
+    base_url = base_url.rstrip("/")
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError(
+            "DEEPSEEK_BASE_URL 配置无效，必须以 http:// 或 https:// 开头，"
+            "例如 https://api.deepseek.com。"
+        )
+    return base_url
 
 
 def deepseek_api_lock() -> asyncio.Lock:
@@ -115,7 +129,7 @@ class DeepSeekClient:
 
     def __init__(self, difficulty_key: str = "") -> None:
         self._api_key = _config(DEEPSEEK_API_KEY)
-        self._base_url = _config(DEEPSEEK_BASE_URL, "https://api.deepseek.com").rstrip("/")
+        self._base_url = deepseek_base_url()
         self._model = deepseek_model_for("translation", difficulty_key)
         self._enabled = is_translation_enabled()
 
@@ -198,7 +212,7 @@ async def generate_solution_brief(
     if not api_key:
         return "未配置 DEEPSEEK_API_KEY，无法生成简要题解。"
 
-    base_url = _config(DEEPSEEK_BASE_URL, "https://api.deepseek.com").rstrip("/")
+    base_url = deepseek_base_url()
     model = deepseek_model_for("solution", difficulty_key)
     prompt = _build_solution_brief_prompt(
         problem_info,

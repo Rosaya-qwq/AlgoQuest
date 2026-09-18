@@ -735,6 +735,57 @@ def test_ensure_difficulty_buffer_keeps_existing_slots(monkeypatch, tmp_path: Pa
     assert ensured_next.key == upcoming.key
 
 
+def test_rendered_problem_is_complete_when_optional_ai_brief_failed(tmp_path: Path) -> None:
+    image_path = tmp_path / "combined.png"
+    image_path.write_bytes(b"png")
+    base = dict(
+        contest_id=1,
+        index="A",
+        rating=800,
+        tags=[],
+        original_name="Hidden",
+        url="https://codeforces.com/problemset/problem/1/A",
+        difficulty="check-in",
+        statement_image=str(image_path),
+        samples_image=str(image_path),
+        generated_at="2026-09-19T00:00:00+00:00",
+        statement_text="完整题面",
+    )
+
+    assert problem_random._is_complete_rendered_problem(
+        problem_random.RenderedProblem(**base, ai_brief="")
+    )
+    assert problem_random._is_complete_rendered_problem(
+        problem_random.RenderedProblem(
+            **base,
+            ai_brief="简要题解生成失败：DEEPSEEK_BASE_URL 配置无效",
+        )
+    )
+
+
+def test_rendered_problem_still_requires_statement_and_image(tmp_path: Path) -> None:
+    missing_image = tmp_path / "missing.png"
+    problem = problem_random.RenderedProblem(
+        contest_id=1,
+        index="A",
+        rating=800,
+        tags=[],
+        original_name="Hidden",
+        url="https://codeforces.com/problemset/problem/1/A",
+        difficulty="check-in",
+        statement_image=str(missing_image),
+        samples_image=str(missing_image),
+        generated_at="2026-09-19T00:00:00+00:00",
+        statement_text="完整题面",
+        ai_brief="cached solution",
+    )
+
+    assert not problem_random._is_complete_rendered_problem(problem)
+    missing_image.write_bytes(b"png")
+    problem.statement_text = ""
+    assert not problem_random._is_complete_rendered_problem(problem)
+
+
 def test_ensure_difficulty_buffer_fills_missing_next(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(problem_random, "STATE_DIR", tmp_path / "states")
     monkeypatch.setattr(problem_random, "RENDERED_DIR", tmp_path / "rendered")
