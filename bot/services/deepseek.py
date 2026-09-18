@@ -30,8 +30,11 @@ DEEPSEEK_MAX_TOKENS = "DEEPSEEK_MAX_TOKENS"
 
 DEFAULT_TIMEOUT_SECONDS = 900.0
 DEFAULT_MAX_TOKENS = 24000
-DEFAULT_FLASH_MODEL = "deepseek-v4-flash"
-DEFAULT_PRO_MODEL = "deepseek-v4-pro"
+DEFAULT_FLASH_MODEL = "deepseek-flash"
+LEGACY_MODEL_ALIASES = {
+    "deepseek-v4-flash": DEFAULT_FLASH_MODEL,
+    "deepseek-v4-pro": DEFAULT_FLASH_MODEL,
+}
 _DEEPSEEK_API_LOCKS: dict[int, asyncio.Lock] = {}
 
 
@@ -81,14 +84,8 @@ def deepseek_model_for(kind: str, difficulty_key: str | None = None, default: st
     for key in keys:
         value = _config(key).strip()
         if value:
-            return value
-    if kind == "translation":
-        return default
-    if kind in {"judge", "solution"}:
-        if difficulty_key == "impossible":
-            return DEFAULT_PRO_MODEL
-        return DEFAULT_FLASH_MODEL
-    return default
+            return LEGACY_MODEL_ALIASES.get(value, value)
+    return LEGACY_MODEL_ALIASES.get(default, default)
 
 
 def is_translation_enabled() -> bool:

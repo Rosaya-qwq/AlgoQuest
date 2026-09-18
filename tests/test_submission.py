@@ -695,7 +695,7 @@ def test_submission_system_prompt_requires_simplified_chinese() -> None:
 
 
 def test_submission_default_model_is_flash() -> None:
-    assert submission.DEFAULT_SUBMISSION_MODEL == "deepseek-v4-flash"
+    assert submission.DEFAULT_SUBMISSION_MODEL == "deepseek-flash"
 
 
 def test_rank_entries_include_solved_counts(monkeypatch, tmp_path: Path) -> None:

@@ -48,23 +48,23 @@
 ```env
 DEEPSEEK_API_KEY=你的API Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_JUDGE_MODEL_CHECK_IN=deepseek-v4-flash
-DEEPSEEK_JUDGE_MODEL_EASY=deepseek-v4-flash
-DEEPSEEK_JUDGE_MODEL_MEDIUM=deepseek-v4-flash
-DEEPSEEK_JUDGE_MODEL_HARD=deepseek-v4-flash
-DEEPSEEK_JUDGE_MODEL_IMPOSSIBLE=deepseek-v4-pro
-DEEPSEEK_SOLUTION_MODEL_CHECK_IN=deepseek-v4-flash
-DEEPSEEK_SOLUTION_MODEL_EASY=deepseek-v4-flash
-DEEPSEEK_SOLUTION_MODEL_MEDIUM=deepseek-v4-flash
-DEEPSEEK_SOLUTION_MODEL_HARD=deepseek-v4-flash
-DEEPSEEK_SOLUTION_MODEL_IMPOSSIBLE=deepseek-v4-pro
-DEEPSEEK_TRANSLATION_MODEL=deepseek-v4-flash
-DEEPSEEK_TRANSLATION_MODEL_CHECK_IN=deepseek-v4-flash
-DEEPSEEK_TRANSLATION_MODEL_EASY=deepseek-v4-flash
-DEEPSEEK_TRANSLATION_MODEL_MEDIUM=deepseek-v4-flash
-DEEPSEEK_TRANSLATION_MODEL_HARD=deepseek-v4-flash
-DEEPSEEK_TRANSLATION_MODEL_IMPOSSIBLE=deepseek-v4-flash
+DEEPSEEK_MODEL=deepseek-flash
+DEEPSEEK_JUDGE_MODEL_CHECK_IN=deepseek-flash
+DEEPSEEK_JUDGE_MODEL_EASY=deepseek-flash
+DEEPSEEK_JUDGE_MODEL_MEDIUM=deepseek-flash
+DEEPSEEK_JUDGE_MODEL_HARD=deepseek-flash
+DEEPSEEK_JUDGE_MODEL_IMPOSSIBLE=deepseek-flash
+DEEPSEEK_SOLUTION_MODEL_CHECK_IN=deepseek-flash
+DEEPSEEK_SOLUTION_MODEL_EASY=deepseek-flash
+DEEPSEEK_SOLUTION_MODEL_MEDIUM=deepseek-flash
+DEEPSEEK_SOLUTION_MODEL_HARD=deepseek-flash
+DEEPSEEK_SOLUTION_MODEL_IMPOSSIBLE=deepseek-flash
+DEEPSEEK_TRANSLATION_MODEL=deepseek-flash
+DEEPSEEK_TRANSLATION_MODEL_CHECK_IN=deepseek-flash
+DEEPSEEK_TRANSLATION_MODEL_EASY=deepseek-flash
+DEEPSEEK_TRANSLATION_MODEL_MEDIUM=deepseek-flash
+DEEPSEEK_TRANSLATION_MODEL_HARD=deepseek-flash
+DEEPSEEK_TRANSLATION_MODEL_IMPOSSIBLE=deepseek-flash
 DEEPSEEK_TRANSLATION_ENABLED=true
 DEEPSEEK_TIMEOUT_SECONDS=900
 DEEPSEEK_MAX_TOKENS=24000
@@ -133,7 +133,7 @@ AT_RATING_IMPOSSIBLE=3000,inf
 ```env
 DEEPSEEK_API_KEY=你的API Key      # 必填
 DEEPSEEK_BASE_URL=https://api.deepseek.com   # 默认值，可改
-DEEPSEEK_TRANSLATION_MODEL=deepseek-v4-flash # 题面中文翻译模型
+DEEPSEEK_TRANSLATION_MODEL=deepseek-flash # 题面中文翻译模型
 DEEPSEEK_TRANSLATION_ENABLED=true # 设为 true 启用题面中文翻译
 ```
 
@@ -142,7 +142,7 @@ DEEPSEEK_TRANSLATION_ENABLED=true # 设为 true 启用题面中文翻译
 - 旧变量 `DEEPSEEK_OBFUSCATION=true` 仍兼容为“启用翻译”，但不会再混淆题面
 - API 调用失败时自动回退为原始题面，不影响 `/giveup` 正常使用
 - 所有 DeepSeek 调用共用一个异步锁；同一时刻只会发送一个翻译、题解或判题请求，适合 2 核 2G 服务器。
-- 默认只有 `impossible` 难度的判题和题解使用 `deepseek-v4-pro`，其他难度和全部翻译使用 `deepseek-v4-flash`。
+- 翻译、判题和题解在全部难度下统一使用 `deepseek-flash`。旧配置中的 `deepseek-v4-flash` 和 `deepseek-v4-pro` 会自动映射到新模型名，仍建议同步更新服务器 `.env`。
 
 **首次启用翻译后**，旧缓存题目仍是英文的。执行以下命令清除缓存：
 
@@ -193,18 +193,220 @@ ATCODER_API_REQUEST_INTERVAL_SECONDS=1.1
 CODEFORCES_PROBLEM_PAGE_BASES=https://codeforces.com/problemset/problem,https://mirror.codeforces.com/problemset/problem
 CODEFORCES_CONTEST_PAGE_BASES=https://codeforces.com/contest,https://mirror.codeforces.com/contest
 CODEFORCES_CLOUDSCRAPER_ENABLED=true
+LUOGU_ENABLED=true
+LUOGU_HTTP_TIMEOUT_SECONDS=30
 VJUDGE_ENABLED=false
 VJUDGE_HTTP_TIMEOUT_SECONDS=60
+PROBLEM_HTTP_PROXY=
 ```
 
 - `PROBLEM_FETCH_MAX_ROUNDS=0` 表示题面抓取/渲染失败后持续重试，直到抓到可用题目。
 - `PROBLEM_STARTUP_FETCH_MAX_ROUNDS=1` 表示启动时每档最多试一轮，避免 CF 主站/镜像不可用时卡住启动；启动后后台维护任务会继续补题。
 - `PROBLEM_BUFFER_MAINTENANCE_INTERVAL_SECONDS` 控制后台补题间隔。缺题、图片丢失、题解为空或题解生成失败时，会在空闲时间反复尝试补齐。
 - `CODEFORCES_CLOUDSCRAPER_ENABLED=true` 表示普通 httpx 抓取 CF 题面失败后，再尝试使用 `cloudscraper` 处理 Cloudflare challenge。它不是万能的；如果 CF 的 challenge 需要真实浏览器交互或当前服务器 IP 被强拦，仍然需要代理或可用镜像。
-- `VJUDGE_ENABLED=true` 表示 CF 主站、镜像站和 cloudscraper 都抓取失败后，再用 VJudge 登录态抓取题面描述。VJudge 只作为 Codeforces 题面的最后兜底，不影响 AtCoder 随机池。
+- `LUOGU_ENABLED=true` 表示 CF/AtCoder 主站题面抓取失败后，尝试解析洛谷搬运页。CF 的回退顺序为主站/镜像/cloudscraper -> 洛谷 -> VJudge，AtCoder 为主站 -> 洛谷。洛谷题面页是公开页面，不需要账号或 Cookie。
+- `LUOGU_HTTP_TIMEOUT_SECONDS` 控制单次洛谷题面请求超时。洛谷可能尚未搬运新题；页面不存在、数据为空或解析失败时，该候选会被跳过，随机池自动换一道题继续抓取。
+- 洛谷仅作为题面、样例和时空限制的备用来源，不强制抓取洛谷题解。Codeforces 官方 tutorial 获取失败时会直接忽略，不阻塞出题与渲染。
+- `VJUDGE_ENABLED=true` 表示 CF 主站、镜像站、cloudscraper 和洛谷都抓取失败后，再用 VJudge 登录态抓取题面描述。VJudge 只作为 Codeforces 题面的最后兜底，不影响 AtCoder 随机池。
 - `VJUDGE_HTTP_TIMEOUT_SECONDS` 控制访问 VJudge 页面和题面描述接口的超时时间。
+- `PROBLEM_HTTP_PROXY` 只代理 CF、VJudge、洛谷、AtCoder 题库 API、题面和题解抓取，不影响 DeepSeek、SnowLuma、OneBot 或系统中的其他程序。使用 Clash/Mihomo 时通常填写 `http://127.0.0.1:7890`。
 - `PROBLEMSET_FETCH_RETRY_DELAY_SECONDS` 控制 CF/AT 题库 API 失败后的重试间隔。
 - `ATCODER_API_REQUEST_INTERVAL_SECONDS` 控制连续访问 AtCoder Problems API 的间隔，默认大于 1 秒。
+
+### 使用 Clash/Mihomo 的 Trojan 代理抓取题目
+
+Bot 不能直接把 `trojan://...` 当作 HTTP 代理。正确链路是：
+
+```text
+AlgoQuest -> http://127.0.0.1:7890 -> Clash/Mihomo -> Trojan 节点或直连 -> 题目来源站
+```
+
+这里推荐服务器使用 Mihomo（Clash.Meta 内核）。代理端口只监听本机回环地址，不要把 `7890` 暴露到公网，也不需要开启 TUN 或全局系统代理。
+
+#### 1. 安装 Mihomo
+
+从官方 Releases 下载与服务器架构匹配的 Linux 版本：
+
+```text
+https://github.com/MetaCubeX/mihomo/releases
+```
+
+先确认服务器架构：
+
+```bash
+uname -m
+```
+
+- `x86_64`：选择 `linux-amd64`。
+- `aarch64` / `arm64`：选择 `linux-arm64`。
+
+解压后把二进制安装到固定位置。假设解压得到的文件名是 `mihomo`：
+
+```bash
+chmod +x mihomo
+sudo install -m 755 mihomo /usr/local/bin/mihomo
+/usr/local/bin/mihomo -v
+```
+
+创建专用用户和目录：
+
+```bash
+sudo useradd --system --home-dir /var/lib/mihomo --create-home --shell /usr/sbin/nologin mihomo
+sudo install -d -m 750 -o mihomo -g mihomo /etc/mihomo /var/lib/mihomo
+```
+
+如果提示 `user 'mihomo' already exists`，可以忽略并继续。
+
+#### 2. 放入 Clash 配置
+
+如果代理服务商提供“Clash 订阅”或可下载的 Clash YAML，优先使用它，不要把订阅 URL、Trojan 密码或完整配置提交到 Git 仓库。将配置保存为：
+
+```text
+/etc/mihomo/config.yaml
+```
+
+然后确认配置中至少有下面几项；已有同名项时修改原项，不要重复添加：
+
+```yaml
+mixed-port: 7890
+allow-lan: false
+bind-address: 127.0.0.1
+mode: rule
+log-level: info
+```
+
+如果服务商只提供单条 Trojan 节点信息，可以按其给出的服务器、端口、密码、SNI 和传输方式填写。最基础的 TCP Trojan 示例是：
+
+```yaml
+mixed-port: 7890
+allow-lan: false
+bind-address: 127.0.0.1
+mode: rule
+log-level: info
+
+proxies:
+  - name: algoquest-trojan
+    type: trojan
+    server: 代理服务器域名
+    port: 443
+    password: "Trojan 密码"
+    sni: TLS 证书对应域名
+    client-fingerprint: chrome
+    udp: true
+
+proxy-groups:
+  - name: ALGOQUEST-PROXY
+    type: select
+    proxies:
+      - algoquest-trojan
+
+rules:
+  - DOMAIN-SUFFIX,codeforces.com,ALGOQUEST-PROXY
+  - DOMAIN-SUFFIX,vjudge.net,ALGOQUEST-PROXY
+  - DOMAIN-SUFFIX,atcoder.jp,ALGOQUEST-PROXY
+  - DOMAIN-SUFFIX,kenkoooo.com,ALGOQUEST-PROXY
+  - DOMAIN-SUFFIX,luogu.com.cn,DIRECT
+  - MATCH,DIRECT
+```
+
+如果节点使用 WebSocket、gRPC 或 Reality，不能直接套用这个基础示例，应该使用服务商生成的 Clash 配置，因为这些节点还需要额外的传输参数。
+
+限制配置文件权限并检查语法：
+
+```bash
+sudo chown mihomo:mihomo /etc/mihomo/config.yaml
+sudo chmod 600 /etc/mihomo/config.yaml
+sudo -u mihomo /usr/local/bin/mihomo -t -d /var/lib/mihomo -f /etc/mihomo/config.yaml
+```
+
+#### 3. 使用 systemd 托管 Mihomo
+
+创建服务：
+
+```bash
+sudo nano /etc/systemd/system/mihomo.service
+```
+
+写入：
+
+```ini
+[Unit]
+Description=Mihomo Local Proxy
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=mihomo
+Group=mihomo
+WorkingDirectory=/var/lib/mihomo
+ExecStart=/usr/local/bin/mihomo -d /var/lib/mihomo -f /etc/mihomo/config.yaml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用并查看日志：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now mihomo
+sudo systemctl status mihomo --no-pager
+sudo journalctl -u mihomo -f
+```
+
+确认本地代理端口已经监听：
+
+```bash
+sudo ss -lntp | grep ':7890'
+```
+
+#### 4. 先独立测试代理
+
+检查代理出口是否工作：
+
+```bash
+curl -x http://127.0.0.1:7890 -I -L --max-time 30 https://codeforces.com/
+curl -x http://127.0.0.1:7890 -I -L --max-time 30 https://vjudge.net/
+```
+
+再测试实际 CF 题面：
+
+```bash
+curl -x http://127.0.0.1:7890 -sS -L --max-time 30 \
+  -o /dev/null -w 'HTTP %{http_code}, total %{time_total}s\n' \
+  'https://codeforces.com/problemset/problem/685/E?locale=en'
+```
+
+理想结果是 `HTTP 200`。如果仍然是 `403` 且响应头包含 `cf-mitigated: challenge`，说明该代理节点的出口 IP 也被 Cloudflare 验证；在代理服务中换节点后重新测试。
+
+#### 5. 让 AlgoQuest 只对题库使用代理
+
+修改项目 `.env`：
+
+```env
+PROBLEM_HTTP_PROXY=http://127.0.0.1:7890
+CODEFORCES_PROBLEM_PAGE_BASES=https://codeforces.com/problemset/problem
+CODEFORCES_CONTEST_PAGE_BASES=https://codeforces.com/contest
+VJUDGE_ENABLED=true
+LUOGU_ENABLED=true
+```
+
+启用代理后先只保留 CF 主站，避免当前不可达的 `mirror.codeforces.com` 为每次失败额外增加一次完整超时。洛谷通常可从中国大陆服务器直连，因此上面的 Mihomo 规则让它走 `DIRECT`；洛谷失败后 VJudge 仍作为 CF 的最后兜底。
+
+重启并观察日志：
+
+```bash
+sudo systemctl restart algorithmic-bot.service
+sudo journalctl -u algorithmic-bot.service -f
+```
+
+如果实际服务名是 `algoquest.service`，把上面的 `algorithmic-bot.service` 换成 `algoquest.service`。
+
+注意：`cf_clearance` 等 Cloudflare Cookie 通常与浏览器指纹和出口 IP 有关。切换到代理后旧 Cookie 可能失效；如果代理能直接返回题面就不需要 Cookie，否则需要让浏览器使用同一个代理节点重新通过验证，再导出新 Cookie。不要把代理订阅、Trojan 密码或 Cookie 发到公开聊天、写进 README 或提交到 Git。
 
 ### CF / AtCoder 登录 Cookie 详细说明
 
@@ -284,10 +486,12 @@ curl -I -L \
 
 如果返回登录页或 bot 日志提示 VJudge 页面没有 `dataJson`，说明 Cookie 无效、过期或复制不完整。VJudge 当前不能直接当作无登录公开代理使用；未登录访问 `https://vjudge.net/problem/CodeForces-685E` 会跳转到登录页，`/origin` 也会回到 Codeforces 原题页并继续遇到 Cloudflare challenge。
 
-本次更新：
+题面备用来源说明：
 
-- 新增 `VJUDGE_ENABLED`、`VJUDGE_COOKIE`、`VJUDGE_COOKIES_FILE`、`VJUDGE_USER_AGENT`、`VJUDGE_HTTP_TIMEOUT_SECONDS`。
-- CF 题面抓取顺序为：Codeforces 主站、镜像站、contest 页面、cloudscraper、VJudge 登录态题面接口。
+- CF 题面抓取顺序为：Codeforces 主站/镜像、contest 页面、cloudscraper、洛谷公开题面、VJudge 登录态题面接口。
+- AtCoder 题面抓取顺序为：AtCoder 主站、洛谷公开题面。
+- 洛谷题面无需登录。直接访问 `https://www.luogu.com.cn/problem/CF1603D` 即可得到公开题目 JSON；洛谷题解页可能要求登录，但 AlgoQuest 不依赖洛谷题解，因此不用配置洛谷账号或 Cookie。
+- 洛谷尚未搬运某道题时，bot 会跳过该随机候选并继续抽取下一题，不会把不存在的页面写入缓存。
 - VJudge fallback 会把 VJudge 的分段题面 JSON 转成现有 CF 渲染器使用的 `.problem-statement`，并从 VJudge 页面读取时间限制、空间限制和 editorial 链接。
 
 ## 本地运行手册
@@ -1024,7 +1228,71 @@ sudo systemctl status snowluma
 journalctl -u snowluma -f
 ```
 
-### 10. 服务器推荐启动顺序
+### 10. 使用脚本更新 SnowLuma
+
+项目根目录提供了 `update_snowluma.sh`。脚本会自动读取 GitHub 最新正式版、识别 `x86_64` / `arm64`、下载对应的 Linux 完整版并校验 GitHub Release 提供的 SHA-256。更新前会创建完整备份，保留配置、登录状态、日志和数据库；如果新服务无法启动，会自动回滚。
+
+先把脚本随项目同步到服务器，然后赋予执行权限：
+
+```bash
+cd /opt/AlgoQuest
+chmod +x update_snowluma.sh
+```
+
+如果 SnowLuma 安装在 `/opt/SnowLuma`，服务名是 `snowluma.service`，直接执行：
+
+```bash
+sudo ./update_snowluma.sh
+```
+
+如果 SnowLuma 安装在此前使用的 `/home/ubuntu/SnowLuma`：
+
+```bash
+sudo ./update_snowluma.sh \
+  --install-dir /home/ubuntu/SnowLuma \
+  --service snowluma.service \
+  --owner ubuntu:ubuntu
+```
+
+只检查当前版和最新版，不执行更新：
+
+```bash
+./update_snowluma.sh --check --install-dir /home/ubuntu/SnowLuma
+```
+
+安装指定版本或强制重装当前版本：
+
+```bash
+sudo ./update_snowluma.sh --version v1.14.17
+sudo ./update_snowluma.sh --force
+```
+
+如果服务器直连 GitHub 下载发行包很慢，而本机 Mihomo 已监听 `7890`，只让本次更新经过代理：
+
+```bash
+sudo ./update_snowluma.sh --proxy http://127.0.0.1:7890
+```
+
+也可以使用环境变量 `SNOWLUMA_DOWNLOAD_PROXY`。代理只用于读取 GitHub Release 信息和下载压缩包。
+
+默认保留最近 3 份备份，位置是 SnowLuma 安装目录同级的 `snowluma-backups/`。可以调整数量和路径：
+
+```bash
+sudo ./update_snowluma.sh \
+  --keep 5 \
+  --backup-dir /home/ubuntu/snowluma-backups
+```
+
+更新完成后检查：
+
+```bash
+sudo systemctl status snowluma --no-pager
+sudo journalctl -u snowluma -n 100 --no-pager
+```
+
+脚本只更新 SnowLuma，不会更新或重启 QQ 客户端。SnowLuma 重启期间 OneBot WebSocket 会短暂断开，恢复后 NoneBot2 会自动重新连接。不要在 SnowLuma 正在更新时手动运行另一份 `launcher.sh`。
+
+### 11. 服务器推荐启动顺序
 
 服务器上建议按这个顺序确认：
 

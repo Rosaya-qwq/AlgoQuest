@@ -220,12 +220,12 @@ def test_deepseek_markdown_parser_accepts_hash_heading_levels() -> None:
 
 def test_deepseek_translation_model_is_independent_from_judge_model(monkeypatch) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "custom-judge-model")
     monkeypatch.delenv("DEEPSEEK_TRANSLATION_MODEL", raising=False)
 
     client = DeepSeekClient()
 
-    assert client._model == "deepseek-v4-flash"
+    assert client._model == "deepseek-flash"
 
     monkeypatch.setenv("DEEPSEEK_TRANSLATION_MODEL", "custom-translation-model")
     client = DeepSeekClient()
@@ -233,7 +233,7 @@ def test_deepseek_translation_model_is_independent_from_judge_model(monkeypatch)
     assert client._model == "custom-translation-model"
 
 
-def test_deepseek_judge_solution_defaults_use_pro_only_for_impossible(monkeypatch) -> None:
+def test_deepseek_defaults_use_flash_for_every_difficulty(monkeypatch) -> None:
     from bot.services.deepseek import deepseek_model_for
 
     for key in (
@@ -247,12 +247,22 @@ def test_deepseek_judge_solution_defaults_use_pro_only_for_impossible(monkeypatc
     ):
         monkeypatch.delenv(key, raising=False)
 
-    assert deepseek_model_for("judge", "easy") == "deepseek-v4-flash"
-    assert deepseek_model_for("solution", "medium") == "deepseek-v4-flash"
-    assert deepseek_model_for("judge", "hard") == "deepseek-v4-flash"
-    assert deepseek_model_for("solution", "hard") == "deepseek-v4-flash"
-    assert deepseek_model_for("judge", "impossible") == "deepseek-v4-pro"
-    assert deepseek_model_for("solution", "impossible") == "deepseek-v4-pro"
+    assert deepseek_model_for("judge", "easy") == "deepseek-flash"
+    assert deepseek_model_for("solution", "medium") == "deepseek-flash"
+    assert deepseek_model_for("judge", "hard") == "deepseek-flash"
+    assert deepseek_model_for("solution", "hard") == "deepseek-flash"
+    assert deepseek_model_for("judge", "impossible") == "deepseek-flash"
+    assert deepseek_model_for("solution", "impossible") == "deepseek-flash"
+
+
+def test_deepseek_legacy_model_names_map_to_flash(monkeypatch) -> None:
+    from bot.services.deepseek import deepseek_model_for
+
+    monkeypatch.setenv("DEEPSEEK_JUDGE_MODEL_IMPOSSIBLE", "deepseek-v4-pro")
+    monkeypatch.setenv("DEEPSEEK_TRANSLATION_MODEL", "deepseek-v4-flash")
+
+    assert deepseek_model_for("judge", "impossible") == "deepseek-flash"
+    assert deepseek_model_for("translation", "easy") == "deepseek-flash"
 
 
 def test_deepseek_obfuscation_prompt_requires_simplified_chinese() -> None:
@@ -811,6 +821,27 @@ def test_fetch_problem_html_uses_cloudscraper_fallback(monkeypatch) -> None:
     assert "problem-statement" in html
 
 
+def test_problem_proxy_is_scoped_to_problem_clients(monkeypatch) -> None:
+    monkeypatch.setattr(problem_random, "PROBLEM_HTTP_PROXY", "http://127.0.0.1:7890")
+
+    assert problem_random._problem_httpx_proxy_kwargs() == {
+        "proxy": "http://127.0.0.1:7890",
+    }
+    assert problem_random._problem_requests_proxy_kwargs() == {
+        "proxies": {
+            "http": "http://127.0.0.1:7890",
+            "https": "http://127.0.0.1:7890",
+        },
+    }
+
+
+def test_problem_proxy_is_disabled_when_empty(monkeypatch) -> None:
+    monkeypatch.setattr(problem_random, "PROBLEM_HTTP_PROXY", "")
+
+    assert problem_random._problem_httpx_proxy_kwargs() == {}
+    assert problem_random._problem_requests_proxy_kwargs() == {}
+
+
 def test_fetch_problem_html_uses_vjudge_fallback(monkeypatch) -> None:
     class Response:
         def __init__(self, text: str = "", fail: bool = False) -> None:
@@ -867,6 +898,127 @@ def test_fetch_problem_html_uses_vjudge_fallback(monkeypatch) -> None:
     assert {"type": "paragraph", "text": "Fallback statement."} in blocks
     assert samples == []
     assert limits == {"time_limit": "1 s", "memory_limit": "64 MB"}
+
+
+def _luogu_page(pid: str) -> str:
+    payload = {
+        "data": {
+            "problem": {
+                "pid": pid,
+                "contenu": {
+                    "description": "给定 $n$。\n\n- 保留列表\n- 保留 `code`",
+                    "formatI": "输入 $n$。",
+                    "formatO": "输出答案。",
+                    "hint": "### 样例解释\n说明内容。",
+                },
+                "content": {},
+                "samples": [["1\n", "2\n"]],
+                "limits": {"time": [2000], "memory": [262144]},
+            }
+        }
+    }
+    import json
+
+    return (
+        '<html><body><script id="lentille-context" type="application/json">'
+        f"{json.dumps(payload, ensure_ascii=False)}"
+        "</script></body></html>"
+    )
+
+
+def test_luogu_codeforces_page_converts_to_existing_parser() -> None:
+    problem = ProblemRef(contest_id=1603, index="D", name="Hidden", rating=2500, tags=[])
+    html = problem_random._luogu_problem_page_to_html(
+        _luogu_page("CF1603D"),
+        problem,
+        expected_pid="CF1603D",
+    )
+
+    blocks, samples, _, limits = _parse_problem_html(html, problem.url)
+
+    assert {"type": "list_item", "text": "保留列表"} in blocks
+    assert {"type": "list_item", "text": "保留 `code`"} in blocks
+    assert samples == [{"input": "1", "output": "2"}]
+    assert limits == {"time_limit": "2 s", "memory_limit": "256 MB"}
+
+
+def test_luogu_atcoder_page_converts_to_existing_parser() -> None:
+    problem = ProblemRef(
+        source="at",
+        contest_id=0,
+        index="abc350_a",
+        name="Hidden",
+        rating=800,
+        tags=[],
+        atcoder_task_id="abc350_a",
+        atcoder_contest_id="abc350",
+    )
+    html = problem_random._luogu_problem_page_to_html(
+        _luogu_page("AT_abc350_a"),
+        problem,
+        expected_pid="AT_abc350_a",
+    )
+
+    blocks, samples, _, limits = _parse_atcoder_problem_html(html, problem.url)
+
+    assert {"type": "heading", "text": "题目描述"} in blocks
+    assert any(block.get("type") == "note" for block in blocks)
+    assert samples == [{"input": "1", "output": "2"}]
+    assert limits == {"time_limit": "2 s", "memory_limit": "256 MB"}
+
+
+def test_fetch_problem_html_tries_luogu_before_vjudge(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class Response:
+        def __init__(self, text: str = "", fail: bool = False) -> None:
+            self.text = text
+            self.fail = fail
+
+        def raise_for_status(self) -> None:
+            if self.fail:
+                raise RuntimeError("unavailable")
+
+    class Client:
+        async def get(self, url: str, **kwargs):
+            calls.append(url)
+            if url == "https://www.luogu.com.cn/problem/CF1A":
+                return Response(_luogu_page("CF1A"))
+            return Response(fail=True)
+
+    async def unexpected_vjudge(*args, **kwargs):
+        raise AssertionError("VJudge must not run after a successful Luogu fallback")
+
+    monkeypatch.setattr(problem_random, "PROBLEM_PAGE_BASES", ("https://codeforces.invalid/problem",))
+    monkeypatch.setattr(problem_random, "PROBLEM_CONTEST_PAGE_BASES", ())
+    monkeypatch.setattr(problem_random, "CODEFORCES_CLOUDSCRAPER_ENABLED", False)
+    monkeypatch.setattr(problem_random, "LUOGU_ENABLED", True)
+    monkeypatch.setattr(problem_random, "VJUDGE_ENABLED", True)
+    monkeypatch.setattr(problem_random, "_fetch_codeforces_html_from_vjudge", unexpected_vjudge)
+
+    html = asyncio.run(
+        problem_random._fetch_problem_html(
+            Client(),
+            ProblemRef(contest_id=1, index="A", name="Hidden", rating=800, tags=[]),
+        )
+    )
+
+    assert "problem-statement" in html
+    assert calls[-1] == "https://www.luogu.com.cn/problem/CF1A"
+
+
+def test_luogu_page_rejects_missing_or_wrong_problem() -> None:
+    problem = ProblemRef(contest_id=1, index="A", name="Hidden", rating=800, tags=[])
+    try:
+        problem_random._luogu_problem_page_to_html(
+            _luogu_page("CF2B"),
+            problem,
+            expected_pid="CF1A",
+        )
+    except RuntimeError as exc:
+        assert "题号不匹配" in str(exc)
+    else:
+        raise AssertionError("wrong Luogu problem id should be rejected")
 
 
 def test_fetch_tutorial_text_uses_cloudscraper_fallback(monkeypatch) -> None:

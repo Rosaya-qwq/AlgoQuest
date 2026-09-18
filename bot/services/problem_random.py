@@ -105,7 +105,7 @@ CODEFORCES_CLOUDSCRAPER_ENABLED = _env_text("CODEFORCES_CLOUDSCRAPER_ENABLED", "
     "1", "true", "yes", "enabled",
 }
 MAX_FETCH_ATTEMPTS = 10
-RENDER_VERSION = 17
+RENDER_VERSION = 18
 ATCODER_REGULAR_CONTEST_RE = re.compile(r"^(?:abc|arc|agc|atc)\d+$", re.IGNORECASE)
 DEFAULT_HTTP_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -122,6 +122,9 @@ ATCODER_COOKIES_FILE = _env_text("ATCODER_COOKIES_FILE")
 VJUDGE_COOKIES_FILE = _env_text("VJUDGE_COOKIES_FILE")
 VJUDGE_ENABLED = _env_text("VJUDGE_ENABLED", "false").lower() in {"1", "true", "yes", "enabled"}
 VJUDGE_HTTP_TIMEOUT_SECONDS = _env_float("VJUDGE_HTTP_TIMEOUT_SECONDS", 60.0)
+LUOGU_ENABLED = _env_text("LUOGU_ENABLED", "true").lower() in {"1", "true", "yes", "enabled"}
+LUOGU_HTTP_TIMEOUT_SECONDS = _env_float("LUOGU_HTTP_TIMEOUT_SECONDS", 30.0)
+PROBLEM_HTTP_PROXY = _env_text("PROBLEM_HTTP_PROXY")
 
 CODEFORCES_API_PROBLEMSET = "https://codeforces.com/api/problemset.problems"
 ATCODER_PROBLEMS_API = "https://kenkoooo.com/atcoder/resources/merged-problems.json"
@@ -134,6 +137,25 @@ PROBLEM_CONTEST_PAGE_BASES = _env_csv("CODEFORCES_CONTEST_PAGE_BASES", (
     "https://codeforces.com/contest",
     "https://mirror.codeforces.com/contest",
 ))
+
+
+def _problem_httpx_proxy_kwargs() -> dict[str, str]:
+    """Return an explicit proxy only for problem-source HTTP clients."""
+    if not PROBLEM_HTTP_PROXY:
+        return {}
+    return {"proxy": PROBLEM_HTTP_PROXY}
+
+
+def _problem_requests_proxy_kwargs() -> dict[str, dict[str, str]]:
+    """Translate the scoped proxy setting for requests/cloudscraper."""
+    if not PROBLEM_HTTP_PROXY:
+        return {}
+    return {
+        "proxies": {
+            "http": PROBLEM_HTTP_PROXY,
+            "https": PROBLEM_HTTP_PROXY,
+        }
+    }
 
 
 @dataclass(frozen=True)
@@ -228,13 +250,16 @@ def _request_headers_for_source(source: str) -> dict[str, str]:
             cookie_file=VJUDGE_COOKIES_FILE,
             domain_hint="vjudge.net",
         )
-    else:
+    elif source == "cf":
         user_agent = CODEFORCES_USER_AGENT
         cookie = _cookie_header(
             direct_cookie=CODEFORCES_COOKIE,
             cookie_file=CODEFORCES_COOKIES_FILE,
             domain_hint="codeforces.com",
         )
+    else:
+        user_agent = DEFAULT_HTTP_USER_AGENT
+        cookie = ""
 
     headers = {"User-Agent": user_agent or DEFAULT_HTTP_USER_AGENT}
     if cookie:
@@ -804,6 +829,7 @@ async def _build_random_problem(
         timeout=HTTP_TIMEOUT_SECONDS,
         headers=_request_headers_for_source(source),
         follow_redirects=True,
+        **_problem_httpx_proxy_kwargs(),
     ) as client:
         round_index = 0
         while True:
@@ -888,6 +914,7 @@ async def _fetch_problemset() -> dict[str, Any]:
     async with httpx.AsyncClient(
         timeout=HTTP_TIMEOUT_SECONDS,
         headers=_request_headers_for_source("cf"),
+        **_problem_httpx_proxy_kwargs(),
     ) as client:
         response = await client.get(CODEFORCES_API_PROBLEMSET)
         response.raise_for_status()
@@ -982,6 +1009,7 @@ async def _fetch_atcoder_problemset() -> dict[str, Any]:
         timeout=ATCODER_HTTP_TIMEOUT_SECONDS,
         headers=_request_headers_for_source("at"),
         follow_redirects=True,
+        **_problem_httpx_proxy_kwargs(),
     ) as client:
         problems_response = await client.get(ATCODER_PROBLEMS_API)
         problems_response.raise_for_status()
@@ -1150,11 +1178,22 @@ def _problem_ref_info(problem: ProblemRef) -> dict[str, Any]:
 
 async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) -> str:
     if problem.source == "at":
-        response = await client.get(problem.url, timeout=ATCODER_HTTP_TIMEOUT_SECONDS)
-        response.raise_for_status()
-        if 'id="task-statement"' not in response.text and "task-statement" not in response.text:
-            raise RuntimeError(f"页面中没有 task-statement：{problem.url}")
-        return response.text
+        try:
+            response = await client.get(problem.url, timeout=ATCODER_HTTP_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            if 'id="task-statement"' not in response.text and "task-statement" not in response.text:
+                raise RuntimeError(f"页面中没有 task-statement：{problem.url}")
+            return response.text
+        except Exception as atcoder_error:
+            if LUOGU_ENABLED:
+                try:
+                    return await _fetch_problem_html_from_luogu(client, problem)
+                except Exception as luogu_error:
+                    raise RuntimeError(
+                        f"AtCoder 主站与洛谷均无法获取题面；主站错误：{atcoder_error}；"
+                        f"洛谷错误：{luogu_error}"
+                    ) from luogu_error
+            raise
 
     last_error: Exception | None = None
     attempted_urls: list[str] = []
@@ -1190,6 +1229,12 @@ async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) ->
             except Exception as exc:  # noqa: BLE001 - best-effort Cloudflare fallback.
                 last_error = exc
                 logger.warning(f"cloudscraper failed for {url}: {exc}")
+    if LUOGU_ENABLED:
+        try:
+            return await _fetch_problem_html_from_luogu(client, problem)
+        except Exception as exc:  # noqa: BLE001 - Luogu may not have copied a recent problem yet.
+            last_error = exc
+            logger.warning(f"Luogu fallback failed for {problem.source} problem {problem.key}: {exc}")
     if VJUDGE_ENABLED:
         try:
             return await _fetch_codeforces_html_from_vjudge(client, problem)
@@ -1200,6 +1245,255 @@ async def _fetch_problem_html(client: httpx.AsyncClient, problem: ProblemRef) ->
         "无法获取题面 HTML；可能是 Codeforces Cloudflare challenge、镜像站 503，"
         f"或服务器网络无法访问。已尝试：{', '.join(attempted_urls)}；最后错误：{last_error}"
     ) from last_error
+
+
+async def _fetch_problem_html_from_luogu(client: httpx.AsyncClient, problem: ProblemRef) -> str:
+    luogu_pid = f"AT_{problem.key}" if problem.source == "at" else f"CF{problem.key}"
+    page_url = f"https://www.luogu.com.cn/problem/{luogu_pid}"
+    response = await client.get(
+        page_url,
+        headers=_request_headers_for_source("luogu"),
+        timeout=LUOGU_HTTP_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    converted = _luogu_problem_page_to_html(response.text, problem, expected_pid=luogu_pid)
+    logger.info(f"Fetched {problem.source} problem {problem.key} from Luogu fallback")
+    return converted
+
+
+def _luogu_problem_page_to_html(page_html: str, problem: ProblemRef, *, expected_pid: str) -> str:
+    soup = BeautifulSoup(page_html, "html.parser")
+    context_node = soup.find("script", id="lentille-context")
+    if context_node is None:
+        raise RuntimeError("洛谷页面中没有 lentille-context")
+    try:
+        context = json.loads(context_node.string or context_node.get_text())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("洛谷题目 JSON 解析失败") from exc
+
+    payload = context.get("data", {}).get("problem") if isinstance(context, dict) else None
+    if not isinstance(payload, dict):
+        raise RuntimeError("洛谷页面中没有题目数据")
+    actual_pid = str(payload.get("pid") or "")
+    if actual_pid.lower() != expected_pid.lower():
+        raise RuntimeError(f"洛谷题号不匹配：期望 {expected_pid}，实际 {actual_pid or '空'}")
+
+    translated = payload.get("contenu")
+    original = payload.get("content")
+    translated = translated if isinstance(translated, dict) else {}
+    original = original if isinstance(original, dict) else {}
+
+    def field(name: str) -> str:
+        return str(translated.get(name) or original.get(name) or "").strip()
+
+    sections = [
+        ("题目描述", field("description"), False),
+        ("输入格式", field("formatI"), False),
+        ("输出格式", field("formatO"), False),
+        ("说明/提示", field("hint"), True),
+    ]
+    if not any(content for _title, content, _is_note in sections):
+        raise RuntimeError("洛谷题面内容为空，可能尚未完成搬运")
+
+    limits = payload.get("limits") if isinstance(payload.get("limits"), dict) else {}
+    time_limit = _format_luogu_time_limit(limits.get("time"))
+    memory_limit = _format_luogu_memory_limit(limits.get("memory"))
+    samples = _luogu_samples(payload.get("samples"))
+    if problem.source == "at":
+        return _luogu_atcoder_html(sections, samples, time_limit, memory_limit)
+    return _luogu_codeforces_html(sections, samples, time_limit, memory_limit)
+
+
+def _luogu_limit_value(raw: Any) -> float | None:
+    value = raw[0] if isinstance(raw, list) and raw else raw
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_luogu_time_limit(raw: Any) -> str:
+    milliseconds = _luogu_limit_value(raw)
+    if milliseconds is None:
+        return ""
+    if milliseconds >= 1000 and milliseconds % 1000 == 0:
+        return f"{milliseconds / 1000:g} s"
+    return f"{milliseconds:g} ms"
+
+
+def _format_luogu_memory_limit(raw: Any) -> str:
+    kibibytes = _luogu_limit_value(raw)
+    if kibibytes is None:
+        return ""
+    if kibibytes >= 1024:
+        return f"{kibibytes / 1024:g} MB"
+    return f"{kibibytes:g} KB"
+
+
+def _luogu_samples(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    samples: list[dict[str, str]] = []
+    for pair in raw:
+        if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+            continue
+        sample_input = str(pair[0] or "").strip("\n")
+        sample_output = str(pair[1] or "").strip("\n")
+        if sample_input or sample_output:
+            samples.append({"input": sample_input, "output": sample_output})
+    return samples
+
+
+def _luogu_codeforces_html(
+    sections: list[tuple[str, str, bool]],
+    samples: list[dict[str, str]],
+    time_limit: str,
+    memory_limit: str,
+) -> str:
+    body_parts: list[str] = []
+    for title, content, is_note in sections:
+        if not content:
+            continue
+        class_name = ' class="note"' if is_note else ""
+        body_parts.append(
+            f"<div{class_name}><div class=\"section-title\">{html_lib.escape(title)}</div>"
+            f"{_luogu_markdown_to_html(content)}</div>"
+        )
+    sample_parts = [
+        '<div class="input"><div class="title">Input</div>'
+        f"<pre>{html_lib.escape(pair['input'])}</pre></div>"
+        '<div class="output"><div class="title">Output</div>'
+        f"<pre>{html_lib.escape(pair['output'])}</pre></div>"
+        for pair in samples
+    ]
+    header = (
+        '<div class="header"><div class="title">Hidden</div>'
+        f'<div class="time-limit">time limit per test: {html_lib.escape(time_limit)}</div>'
+        f'<div class="memory-limit">memory limit per test: {html_lib.escape(memory_limit)}</div></div>'
+    )
+    sample_html = f'<div class="sample-test">{"".join(sample_parts)}</div>' if sample_parts else ""
+    return f'<html><body><div class="problem-statement">{header}{"".join(body_parts)}{sample_html}</div></body></html>'
+
+
+def _luogu_atcoder_html(
+    sections: list[tuple[str, str, bool]],
+    samples: list[dict[str, str]],
+    time_limit: str,
+    memory_limit: str,
+) -> str:
+    parts: list[str] = []
+    for title, content, is_note in sections:
+        if not content:
+            continue
+        class_name = ' class="note"' if is_note else ""
+        parts.append(
+            f"<section{class_name}><div class=\"section-title\">{html_lib.escape(title)}</div>"
+            f"{_luogu_markdown_to_html(content)}</section>"
+        )
+    for index, pair in enumerate(samples, start=1):
+        parts.extend([
+            f"<section><h3>Sample Input {index}</h3><pre>{html_lib.escape(pair['input'])}</pre></section>",
+            f"<section><h3>Sample Output {index}</h3><pre>{html_lib.escape(pair['output'])}</pre></section>",
+        ])
+    limits = f"Time Limit: {html_lib.escape(time_limit)} / Memory Limit: {html_lib.escape(memory_limit)}"
+    return (
+        f'<html><body><p>{limits}</p><div id="task-statement"><div class="lang-en">'
+        f'{"".join(parts)}</div></div></body></html>'
+    )
+
+
+def _luogu_markdown_to_html(markdown: str) -> str:
+    lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    output: list[str] = []
+    paragraph: list[str] = []
+    list_items: list[str] = []
+    list_tag = ""
+    code_lines: list[str] = []
+    in_code = False
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            output.append(f"<p>{'<br>'.join(_luogu_inline_markdown(line) for line in paragraph)}</p>")
+            paragraph.clear()
+
+    def flush_list() -> None:
+        nonlocal list_tag
+        if list_items:
+            output.append(f"<{list_tag}>{''.join(f'<li>{item}</li>' for item in list_items)}</{list_tag}>")
+            list_items.clear()
+            list_tag = ""
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        if line.lstrip().startswith("```"):
+            flush_paragraph()
+            flush_list()
+            if in_code:
+                output.append(f"<pre>{html_lib.escape(chr(10).join(code_lines))}</pre>")
+                code_lines.clear()
+            in_code = not in_code
+            continue
+        if in_code:
+            code_lines.append(line)
+            continue
+        if re.match(r"^\s*\[problemUrl\]:", line, flags=re.IGNORECASE):
+            continue
+        if not line.strip():
+            flush_paragraph()
+            flush_list()
+            continue
+        heading = re.match(r"^\s*#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            flush_paragraph()
+            flush_list()
+            output.append(f"<h4>{_luogu_inline_markdown(heading.group(1))}</h4>")
+            continue
+        unordered = re.match(r"^\s*[-+*]\s+(.+)$", line)
+        ordered = re.match(r"^\s*\d+[.)]\s+(.+)$", line)
+        if unordered or ordered:
+            flush_paragraph()
+            new_tag = "ul" if unordered else "ol"
+            if list_tag and list_tag != new_tag:
+                flush_list()
+            list_tag = new_tag
+            list_items.append(_luogu_inline_markdown((unordered or ordered).group(1)))
+            continue
+        flush_list()
+        paragraph.append(re.sub(r"^\s*>\s?", "", line))
+
+    if in_code:
+        output.append(f"<pre>{html_lib.escape(chr(10).join(code_lines))}</pre>")
+    flush_paragraph()
+    flush_list()
+    return "".join(output)
+
+
+def _luogu_inline_markdown(text: str) -> str:
+    fragments: list[str] = []
+
+    def stash(fragment: str) -> str:
+        token = f"@@LUOGU_FRAGMENT_{len(fragments)}@@"
+        fragments.append(fragment)
+        return token
+
+    text = re.sub(
+        r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+['\"][^'\"]*['\"])?\)",
+        lambda match: stash(
+            f'<img src="{html_lib.escape(urljoin("https://www.luogu.com.cn/", match.group(2)), quote=True)}" '
+            f'alt="{html_lib.escape(match.group(1), quote=True)}">'
+        ),
+        text,
+    )
+    text = re.sub(
+        r"`([^`\n]+)`",
+        lambda match: stash(f"<code>{html_lib.escape(match.group(1))}</code>"),
+        text,
+    )
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", lambda match: match.group(1), text)
+    escaped = html_lib.escape(text)
+    for index, fragment in enumerate(fragments):
+        escaped = escaped.replace(f"@@LUOGU_FRAGMENT_{index}@@", fragment)
+    return escaped
 
 
 async def _fetch_codeforces_html_from_vjudge(client: httpx.AsyncClient, problem: ProblemRef) -> str:
@@ -1424,6 +1718,7 @@ def _fetch_with_cloudscraper_sync(url: str, timeout: float) -> str:
         url,
         headers=headers,
         timeout=timeout,
+        **_problem_requests_proxy_kwargs(),
     )
     response.raise_for_status()
     return response.text
