@@ -32,7 +32,7 @@
 - `/submit <cf|at> <难度> <题解描述>`：在当前群 `algo:enable` 时可用，提交当前难度题目的题解描述，由 DeepSeek 进行思路评审，并更新本地 rating 与难度计数。
 - `/pass <cf|at> <难度>`：在当前群 `algo:enable` 时，本群群管理或全局超管回复用户提交消息，强制通过当前题；不能手动输入 uid，一血已产生时无效。
 - `/rank`：在当前群 `algo:enable` 时可用；`rank:self` 时普通用户只能查看自己，`rank:all` 时全体可查看全体排行榜，本群群管理和全局超管始终可查看全体。图片包含头像、用户名、uid、CF/AT rating 和五档难度通过数。
-- `/search [关键词] [图片]`：在当前群 `search:enable` 时可用，`/serach` 同义；使用 DeepSeek 联网搜索并附来源。政治相关和 R18G 关键词或回复会被拒绝；每次调用无聊天上下文。
+- `/search [关键词] [图片]`：在当前群 `search:enable` 时可用；使用 DeepSeek 联网搜索并附来源。
 - `/emoji <表情或ID>`：在当前群 `emoji:enable` 时可用；全局超管任意时刻可用。给本条消息贴同款 QQ 表情；如果引用某条消息，则只给被引用的消息贴表情。群成员单独发送一个 Unicode 表情或 QQ 表情时，也会触发跟贴；全局超管发送 Unicode 表情且贴成功后会自动学习绑定。`/emoji 368` 这类数字会直接作为 SnowLuma / OneBot 表情回应 ID 尝试贴上，不可用时返回“表情不可用”。手动给某条消息贴表情时，机器人会尝试给同一条消息贴同款表情；失败时静默。`/emoji <表情>=<ID>` 可以绑定 Unicode 表情与贴表情 ID，`/emoji <表情>!=<ID>` 删除绑定；绑定左侧必须是单个 Unicode 表情，右侧必须全为数字，变体选择符会被规范化去重。未绑定 Unicode 表情会尝试用 Unicode 十进制码点作为 ID，贴成功后自动绑定。
 - `/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> <search:enable|disable>`：超级管理员覆盖当前群配置。新群默认各功能关闭，除全局超管外不可调用 bot。
 - `/config`：查看当前群配置，输出一行可直接复制执行的 `/init ...` 命令。
@@ -52,6 +52,8 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_TRANSLATION_ENABLED=true
 DEEPSEEK_TIMEOUT_SECONDS=900
 DEEPSEEK_MAX_TOKENS=24000
+DEEPSEEK_SEARCH_MAX_TOKENS=24000
+DEEPSEEK_SEARCH_PAGE_CHARS=12000
 ALGOQUEST_DATA_DIR=
 CF_RATING_CHECK_IN=0,1200
 CF_RATING_EASY=1200,1800
@@ -69,9 +71,13 @@ AT_RATING_IMPOSSIBLE=3000,inf
 
 ### DeepSeek 联网搜索
 
-`/search` 使用同一个 `DEEPSEEK_API_KEY`。它先调用 DeepSeek Search API 获取网页结果，再由 `deepseek-flash` 生成简体中文摘要，最后附上来源链接。搜索前审查本次文字和图片，发送前再次审查完整回复；政治相关或 R18G 内容会拒绝，审查接口异常时也不会发送未经审查的内容。每次请求只包含本次消息及本次搜索结果，不保存对话历史。Search API 可能单独计费，请查看 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
+`/search` 使用同一个 `DEEPSEEK_API_KEY` 和 `deepseek-flash` 模型。先审查本次输入，再使用 DeepSeek Search API 联网查找网页；回答时开启 `thinking:enabled`、`reasoning_effort:high`，保留原始提问与高清输入图片，并将最多 8 条搜索结果的摘要/正文送给模型。`DEEPSEEK_SEARCH_MAX_TOKENS` 控制推理加回答的输出预算（默认 24000），`DEEPSEEK_SEARCH_PAGE_CHARS` 控制每条网页正文最大字符数（默认 12000）。判题/翻译仍使用自己的配置。搜索前后会审查明确违规内容，审查失败时不会发送未经审查的回复。每次调用不继承之前消息。Search/Fetch API 可能单独计费，参见 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
 
-支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先把本次文字和图片一起交给 `deepseek-flash`，提取综合搜索关键词，再传给 Search API。搜索结果正文若包含相关图片，模型可以在回复中引用图片编号；Bot 最多发送 5 张，文字和每张图片都会引用调用者消息。图片在临时目录下载，发送结束后删除；链接失效则跳过该图片。
+支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先结合本次文字和图片提取精确检索词，再传给 Search API。解算法题时原图会再次提供给回答模型，提示它核对题意、约束和样例；不相关的网页不能当作题解。找图请求会排除 GitHub 网页，必要时尝试 DeepSeek Fetch 读取候选网页里的图片链接，最终只发送模型选中且通过检查的图片；找不到可用图片时明确说明。文字和每张图片都会引用调用者消息；图片下载到临时目录，发送后删除。
+
+`#sl` 状态查询仅限全局超级管理员。本项目不会在 `/help` 或其他自动提示中公布该入口。必须先在 SnowLuma WebUI 的 OneBot 配置中关闭其原生状态命令；若直接编辑 SnowLuma 当前账号生效的 `config/onebot.json`，将 `statusCommand.enabled` 设为 `false` 后重启 SnowLuma。SnowLuma 原生命令在转发事件到 NoneBot 之前就会回复，单靠本项目无法限制它。关闭原生命令后，本项目会处理 `#sl`：超管看到 SnowLuma 在线状态和运行秒数，普通成员静默。
+
+若 `/search` 提示 HTTP 400，更新版会同时显示失败阶段（内容审查、图片识别、网页搜索或生成摘要）和 DeepSeek 返回的错误原因，并隐藏错误中的图片链接。图文搜索在内容审查阶段报图片读取失败时，检查 QQ 图片地址是否可由 DeepSeek 服务器访问；可先用纯文字 `/search` 判断文字请求是否正常。不要把带令牌的图片链接或 API Key 发到群里。
 
 搜索开关保存在各群配置中，旧群配置自动按 `search:disable` 处理。超级管理员在目标群输入：
 

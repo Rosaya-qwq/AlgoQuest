@@ -43,11 +43,12 @@ def test_search_uses_fresh_messages_and_reviews_answer(monkeypatch) -> None:
     )
 
     assert "先排序后扫描。" in reply.text
-    assert "https://example.com/a" in reply.text
+    assert "https://example.com/a" not in reply.text
     assert reply.image_urls == ()
     assert len(calls) == 6
     assert calls[3][0].endswith("/v1/tools/search")
     assert calls[3][1]["query"] == "算法竞赛 图片内容"
+    assert calls[3][1]["count"] == 8
     assert calls[3][1]["need_content"] is True
     for url, body in (calls[0], calls[1], calls[2], calls[4], calls[5]):
         assert url.endswith("/chat/completions")
@@ -55,6 +56,11 @@ def test_search_uses_fresh_messages_and_reviews_answer(monkeypatch) -> None:
         assert [message["role"] for message in body["messages"]] == ["system", "user"]
     user_parts = calls[4][1]["messages"][1]["content"]
     assert user_parts[1]["image_url"]["url"] == "https://example.com/input.png"
+    assert user_parts[1]["image_url"]["detail"] == "original"
+    assert calls[4][1]["thinking"]["type"] == "enabled"
+    assert calls[4][1]["reasoning_effort"] == "high"
+    assert calls[4][1]["max_tokens"] == 24000
+    assert "用户原始问题：算法竞赛" in user_parts[0]["text"]
     assert "算法竞赛" in calls[1][1]["messages"][1]["content"][0]["text"]
 
 
@@ -66,11 +72,13 @@ def test_image_only_search_derives_query(monkeypatch) -> None:
             _chat("图片里的花"),
             _chat('{"allowed": true}'),
             {"results": []},
+            _chat("这是一朵花。"),
+            _chat('{"allowed": true}'),
         ],
         query="",
         images=("https://example.com/input.png",),
     )
-    assert reply.text == "没有找到相关网页。"
+    assert reply.text == "这是一朵花。"
     assert calls[3][1]["query"] == "图片里的花"
 
 
@@ -119,7 +127,7 @@ def test_search_rejects_unsafe_output_and_keeps_images_private(monkeypatch) -> N
         asyncio.run(web_search.search_web("示例图片"))
 
     assert len(calls) == 4
-    assert calls[3]["messages"][1]["content"][1]["image_url"]["url"] == "https://example.com/image.png"
+    assert calls[3]["messages"][1]["content"] == "查看 [图片1]。"
 
 
 def test_search_returns_only_referenced_images(monkeypatch) -> None:
@@ -135,6 +143,74 @@ def test_search_returns_only_referenced_images(monkeypatch) -> None:
             }]},
             _chat("请看 [图片2]。"),
             _chat('{"allowed": true}'),
+            _chat('{"allowed": true}'),
         ],
     )
     assert reply.image_urls == ("https://example.com/2.png",)
+
+
+def test_image_search_prioritizes_images_and_skips_unsafe_candidate(monkeypatch) -> None:
+    calls, reply = _run_search(
+        monkeypatch,
+        [
+            _chat('{"allowed": true}'),
+            {"results": [{
+                "title": "角色图库",
+                "url": "https://example.com/gallery",
+                "summary": "角色插画",
+                "content": "![角色](https://example.com/character.png)",
+            }]},
+            _chat("找到一张角色插画 [图片1]。"),
+            _chat('{"allowed": true}'),
+            _chat('{"allowed": false}'),
+        ],
+        query="帮我找一张海泽莉塔的图片",
+    )
+
+    assert "图片" in reply.text or "插画" in reply.text
+    assert reply.image_urls == ()
+    assert "-site:github.com" in calls[1][1]["query"]
+    assert calls[4][1]["messages"][1]["content"][1]["image_url"]["url"] == "https://example.com/character.png"
+
+
+def test_image_search_fetches_page_when_search_has_no_image(monkeypatch) -> None:
+    calls, reply = _run_search(
+        monkeypatch,
+        [
+            _chat('{"allowed": true}'),
+            {"results": [{"title": "图库", "url": "https://example.com/gallery", "summary": "角色图库", "content": ""}]},
+            {"title": "图库", "content": "![角色](https://example.com/character.png)"},
+            _chat("这张图符合要求 [图片1]。"),
+            _chat('{"allowed": true}'),
+            _chat('{"allowed": true}'),
+        ],
+        query="帮我找一张鲸鱼娘的图片",
+    )
+
+    assert calls[2][0].endswith("/v1/tools/fetch")
+    assert calls[2][1]["url"] == "https://example.com/gallery"
+    assert reply.image_urls == ("https://example.com/character.png",)
+
+
+def test_problem_screenshot_is_not_treated_as_picture_request() -> None:
+    assert not web_search._wants_images("帮我看这张图片里的题怎么做")
+    assert web_search._wants_images("帮我找一张鲸鱼娘的图片")
+
+
+def test_chat_400_reports_stage_and_redacts_image_url(monkeypatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {
+            "message": "Failed to fetch https://example.com/private?token=secret"
+        }})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(web_search.httpx, "AsyncClient", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handler), **kwargs,
+    ))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+    with pytest.raises(RuntimeError, match="DeepSeek 内容审查失败 \\(HTTP 400\\)") as exc_info:
+        asyncio.run(web_search.search_web("搜索这张图", ("https://example.com/input.png",)))
+
+    assert "Failed to fetch" in str(exc_info.value)
+    assert "secret" not in str(exc_info.value)

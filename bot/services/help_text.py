@@ -34,5 +34,5 @@ def group_help_text(config: GroupConfig) -> str:
     if config.emoji_enabled:
         lines.append("/emoji <表情或ID> - 给消息贴同款 QQ 表情")
     if config.search_enabled:
-        lines.append("/search [关键词] [图片] - 联网搜索（/serach 同义）")
+        lines.append("/search [关键词] [图片] - 联网搜索")
     return "\n".join(lines)

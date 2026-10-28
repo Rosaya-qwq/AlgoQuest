@@ -27,7 +27,7 @@ __plugin_meta__ = PluginMetadata(
     usage="/search [关键词] [图片]",
 )
 
-search_cmd = on_command("search", aliases={"serach"}, priority=5, block=True)
+search_cmd = on_command("search", priority=5, block=True)
 
 
 @search_cmd.handle()

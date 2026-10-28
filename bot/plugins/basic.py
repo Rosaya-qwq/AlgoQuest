@@ -1,7 +1,8 @@
-from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, Event, GroupMessageEvent, Message
+from nonebot import on_command, on_message
+from nonebot.adapters.onebot.v11 import Bot, Event, GroupMessageEvent, Message, MessageEvent
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
+from nonebot.rule import Rule
 
 from bot.services.group_config import (
     format_group_config,
@@ -29,6 +30,29 @@ help_cmd = on_command("help", aliases={"帮助"}, priority=5, block=True)
 ping_cmd = on_command("ping", aliases={"状态"}, priority=5, block=True)
 init_cmd = on_command("init", aliases={"初始化"}, priority=4, block=True)
 config_cmd = on_command("config", aliases={"配置"}, priority=5, block=True)
+
+
+def _is_status_message(event: Event) -> bool:
+    return isinstance(event, MessageEvent) and event.get_plaintext().strip() == "#sl"
+
+
+status_cmd = on_message(rule=Rule(_is_status_message), priority=3, block=True)
+
+
+@status_cmd.handle()
+async def handle_status(bot: Bot, event: Event) -> None:
+    if not is_superuser(event):
+        await status_cmd.finish()
+    try:
+        status = await bot.call_api("get_status")
+    except Exception:
+        await status_cmd.finish("SnowLuma 状态查询失败。")
+    if not isinstance(status, dict):
+        await status_cmd.finish("SnowLuma 状态查询失败。")
+    online = "在线" if status.get("online") else "离线"
+    seconds = status.get("time")
+    uptime = f"，运行 {int(seconds)} 秒" if isinstance(seconds, (int, float)) and seconds >= 0 else ""
+    await status_cmd.finish(f"SnowLuma {online}{uptime}")
 
 
 @help_cmd.handle()
