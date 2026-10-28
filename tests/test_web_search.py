@@ -59,7 +59,7 @@ def test_search_uses_fresh_messages_and_reviews_answer(monkeypatch) -> None:
     assert user_parts[1]["image_url"]["detail"] == "original"
     assert calls[4][1]["thinking"]["type"] == "enabled"
     assert calls[4][1]["reasoning_effort"] == "high"
-    assert calls[4][1]["max_tokens"] == 24000
+    assert calls[4][1]["max_tokens"] == 65536
     assert "用户原始问题：算法竞赛" in user_parts[0]["text"]
     assert "算法竞赛" in calls[1][1]["messages"][1]["content"][0]["text"]
 
@@ -190,6 +190,67 @@ def test_image_search_fetches_page_when_search_has_no_image(monkeypatch) -> None
     assert calls[2][0].endswith("/v1/tools/fetch")
     assert calls[2][1]["url"] == "https://example.com/gallery"
     assert reply.image_urls == ("https://example.com/character.png",)
+
+
+def test_moegirl_file_page_uses_og_image(monkeypatch) -> None:
+    calls = []
+    replies = iter([
+        _chat('{"allowed": true}'),
+        {"results": [{
+            "title": "白圣女与黑牧师 海泽莉塔.jpg",
+            "url": "https://commons.moegirl.org.cn/File:Hazelita.jpg",
+            "summary": "角色图片文件页",
+            "content": "",
+        }]},
+        _chat("找到角色图片 [图片1]。"),
+        _chat('{"allowed": true}'),
+        _chat('{"allowed": true}'),
+    ])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if request.method == "GET":
+            return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"}, text=(
+                '<html><head><meta property="og:image" '
+                'content="https://storage.moegirl.org.cn/moegirl/commons/e/ea/Hazelita.jpg"></head></html>'
+            ))
+        return httpx.Response(200, json=next(replies))
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(web_search.httpx, "AsyncClient", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handler), **kwargs,
+    ))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    reply = asyncio.run(web_search.search_web("帮我找一张海泽莉塔的图片"))
+
+    assert "https://commons.moegirl.org.cn/File:Hazelita.jpg" in calls
+    assert reply.image_urls == ("https://storage.moegirl.org.cn/moegirl/commons/e/ea/Hazelita.jpg",)
+
+
+def test_truncated_answer_retries_once_with_larger_budget(monkeypatch) -> None:
+    calls = []
+    replies = iter([
+        _chat('{"allowed": true}'),
+        {"results": [{"title": "题解", "url": "https://example.com/a", "summary": "相关资料"}]},
+        {"choices": [{"finish_reason": "length", "message": {"content": ""}}]},
+        _chat("完整解题思路。"),
+        _chat('{"allowed": true}'),
+    ])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json=next(replies))
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(web_search.httpx, "AsyncClient", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handler), **kwargs,
+    ))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    reply = asyncio.run(web_search.search_web("这题怎么做"))
+
+    assert reply.text == "完整解题思路。"
+    assert calls[2]["max_tokens"] == 65536
+    assert calls[3]["max_tokens"] == 131072
 
 
 def test_problem_screenshot_is_not_treated_as_picture_request() -> None:

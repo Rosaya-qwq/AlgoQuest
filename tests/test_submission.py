@@ -1,5 +1,9 @@
+import asyncio
 import json
 from pathlib import Path
+
+import httpx
+import pytest
 
 from bot.services import submission
 from bot.services.problem_random import RenderedProblem
@@ -686,8 +690,87 @@ def test_parse_review_payload_normalizes_inconsistent_verdict() -> None:
 
     assert low_score_accept.verdict == "INCOMPLETE"
     assert not low_score_accept.accepted
-    assert high_score_reject.verdict == "ACCEPTED"
-    assert high_score_reject.accepted
+    assert high_score_reject.verdict == "INCOMPLETE"
+    assert not high_score_reject.accepted
+
+
+def _passing_review_payload() -> dict:
+    return {
+        "verdict": "ACCEPTED", "score": 0.95, "confidence": 0.95,
+        "checks": {key: "PASS" for key in (
+            "understanding", "key_logic", "samples", "extra_tests", "proof", "complexity",
+        )},
+        "extra_tests": ["额外数据一一致。", "额外数据二一致。"],
+    }
+
+
+def test_accept_requires_all_checks_and_two_extra_tests() -> None:
+    payload = _passing_review_payload()
+    assert submission._parse_review_payload(payload).accepted
+    del payload["checks"]
+    assert not submission._parse_review_payload(payload).accepted
+    payload = _passing_review_payload()
+    payload["extra_tests"] = ["只有一组数据。"]
+    assert not submission._parse_review_payload(payload).accepted
+
+
+@pytest.mark.parametrize("key", ["understanding", "key_logic", "samples", "extra_tests", "proof", "complexity"])
+def test_failed_or_unknown_checks_cannot_be_accepted(key: str) -> None:
+    for value in ("FAIL", "UNKNOWN", "", None, []):
+        payload = _passing_review_payload()
+        payload["checks"][key] = value
+        assert not submission._parse_review_payload(payload).accepted
+
+
+def test_correct_outline_can_omit_routine_proof() -> None:
+    payload = _passing_review_payload()
+    payload["checks"]["proof"] = "NOT_APPLICABLE"
+    assert submission._parse_review_payload(payload).accepted
+
+
+def test_low_confidence_accept_is_uncertain() -> None:
+    payload = _passing_review_payload()
+    payload["confidence"] = 0.3
+    result = submission._parse_review_payload(payload)
+    assert result.verdict == "UNCERTAIN"
+    assert not result.accepted
+
+
+def test_downgraded_accept_does_not_publish_success_feedback() -> None:
+    payload = _passing_review_payload()
+    payload["checks"]["proof"] = "FAIL"
+    payload["safe_feedback"] = ["本次提交通过。"]
+    payload["summary"] = "本次提交通过。"
+    review = submission._parse_review_payload(payload)
+    assert not review.accepted
+    assert "本次提交通过。" not in review.safe_feedback
+    assert review.summary != payload["summary"]
+    assert any("证明思路" in item for item in review.safe_feedback)
+
+
+def test_judge_request_uses_json_thinking_and_retries_truncation(monkeypatch) -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{
+            "finish_reason": "length" if len(calls) == 1 else "stop",
+            "message": {"content": None if len(calls) == 1 else '{"verdict":"INCOMPLETE"}'},
+        }]})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(submission.httpx, "AsyncClient", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handler), **kwargs,
+    ))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_JUDGE_MAX_TOKENS", "65536")
+    result = asyncio.run(submission._chat_for_submission("只评审本次提交"))
+    assert json.loads(result)["verdict"] == "INCOMPLETE"
+    assert [body["max_tokens"] for body in calls] == [65536, 131072]
+    assert calls[0]["thinking"] == {"type": "enabled"}
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert calls[0]["reasoning_effort"] == "high"
+    assert calls[0]["messages"] == calls[1]["messages"]
 
 
 def test_submission_system_prompt_requires_simplified_chinese() -> None:

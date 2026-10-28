@@ -26,7 +26,7 @@ DEEPSEEK_OBFUSCATION = "DEEPSEEK_OBFUSCATION"
 DEEPSEEK_TIMEOUT_SECONDS = "DEEPSEEK_TIMEOUT_SECONDS"
 DEEPSEEK_MAX_TOKENS = "DEEPSEEK_MAX_TOKENS"
 
-DEFAULT_TIMEOUT_SECONDS = 900.0
+DEFAULT_TIMEOUT_SECONDS = 1800.0
 DEFAULT_MAX_TOKENS = 24000
 DEFAULT_FLASH_MODEL = "deepseek-flash"
 _DEEPSEEK_API_LOCKS: dict[int, asyncio.Lock] = {}
@@ -48,6 +48,13 @@ def deepseek_max_tokens(default: int = DEFAULT_MAX_TOKENS) -> int:
         return max(1024, int(_config(DEEPSEEK_MAX_TOKENS, str(default))))
     except ValueError:
         return default
+
+
+def deepseek_judge_max_tokens() -> int:
+    try:
+        return min(131072, max(4096, int(_config("DEEPSEEK_JUDGE_MAX_TOKENS", "65536"))))
+    except ValueError:
+        return 65536
 
 
 def deepseek_base_url() -> str:

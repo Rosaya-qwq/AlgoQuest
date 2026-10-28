@@ -50,10 +50,11 @@
 DEEPSEEK_API_KEY=你的API Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_TRANSLATION_ENABLED=true
-DEEPSEEK_TIMEOUT_SECONDS=900
+DEEPSEEK_TIMEOUT_SECONDS=1800
 DEEPSEEK_MAX_TOKENS=24000
-DEEPSEEK_SEARCH_MAX_TOKENS=24000
+DEEPSEEK_SEARCH_MAX_TOKENS=65536
 DEEPSEEK_SEARCH_PAGE_CHARS=12000
+DEEPSEEK_JUDGE_MAX_TOKENS=65536
 ALGOQUEST_DATA_DIR=
 CF_RATING_CHECK_IN=0,1200
 CF_RATING_EASY=1200,1800
@@ -69,11 +70,15 @@ AT_RATING_IMPOSSIBLE=3000,inf
 
 `ALGOQUEST_DATA_DIR` 默认留空即可，此时运行数据固定存放在项目根目录的 `data/` 下，不受 systemd `WorkingDirectory` 影响。只有当你想把榜单、群配置、题目缓存等运行数据单独放到别的磁盘时，才需要填写绝对路径，例如 `/var/lib/algoquest`。
 
+判题使用 `deepseek-flash` 的高强度思考和 JSON 输出模式；`DEEPSEEK_JUDGE_MAX_TOKENS` 是独立的推理加回答预算，默认 65536。被截断时最多扩大预算到 131072 并重试一次，异常或空结果不会写入榜单。`DEEPSEEK_TIMEOUT_SECONDS` 默认 1800 秒。思路评审允许省略常规实现细节，但支撑算法的非平凡性质需要有效的证明轮廓；仅写“显然”或“和题解一样”不算证明。评审会独立核对样例、两组额外小数据、核心逻辑、证明和复杂度；结果缺失、未知或失败时不能自动通过，也不再因评分高而把未通过改成通过。每次只评审本次提交，仍共用 AI 锁；用户回复不展示内部思考或详细模拟过程。AI 思路评审不等于编译运行程序的 OJ 判题，不能保证覆盖所有反例。
+
+修改 `.env` 后需要重启 bot 服务。`.env` 不随 Git 提交；服务器使用自己的 `.env`，更新源码不会自动覆盖服务器密钥或本地配置。
+
 ### DeepSeek 联网搜索
 
-`/search` 使用同一个 `DEEPSEEK_API_KEY` 和 `deepseek-flash` 模型。先审查本次输入，再使用 DeepSeek Search API 联网查找网页；回答时开启 `thinking:enabled`、`reasoning_effort:high`，保留原始提问与高清输入图片，并将最多 8 条搜索结果的摘要/正文送给模型。`DEEPSEEK_SEARCH_MAX_TOKENS` 控制推理加回答的输出预算（默认 24000），`DEEPSEEK_SEARCH_PAGE_CHARS` 控制每条网页正文最大字符数（默认 12000）。判题/翻译仍使用自己的配置。搜索前后会审查明确违规内容，审查失败时不会发送未经审查的回复。每次调用不继承之前消息。Search/Fetch API 可能单独计费，参见 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
+`/search` 使用同一个 `DEEPSEEK_API_KEY` 和 `deepseek-flash` 模型。先审查本次输入，再使用 DeepSeek Search API 联网查找网页；回答时开启 `thinking:enabled`、`reasoning_effort:high`，保留原始提问与高清输入图片，并将最多 8 条搜索结果的摘要/正文送给模型。`DEEPSEEK_SEARCH_MAX_TOKENS` 控制推理加回答的输出预算（默认 65536）；若回答仍因预算耗尽被截断，会以不超过 131072 tokens 的预算重试一次，可能额外消耗 API 额度。`DEEPSEEK_SEARCH_PAGE_CHARS` 控制每条网页正文最大字符数（默认 12000）。判题/翻译仍使用自己的配置。搜索前后会审查明确违规内容，审查失败时不会发送未经审查的回复。每次调用不继承之前消息。Search/Fetch API 可能单独计费，参见 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
 
-支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先结合本次文字和图片提取精确检索词，再传给 Search API。解算法题时原图会再次提供给回答模型，提示它核对题意、约束和样例；不相关的网页不能当作题解。找图请求会排除 GitHub 网页，必要时尝试 DeepSeek Fetch 读取候选网页里的图片链接，最终只发送模型选中且通过检查的图片；找不到可用图片时明确说明。文字和每张图片都会引用调用者消息；图片下载到临时目录，发送后删除。
+支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先结合本次文字和图片提取精确检索词，再传给 Search API。解算法题时原图会再次提供给回答模型，提示它核对题意、约束和样例；不相关的网页不能当作题解。找图请求会排除 GitHub 网页，先从搜索结果找图片；对萌娘百科/萌娘共享、B 站等受信任站点的结果，还会读取公开页面的 `og:image` 或 `twitter:image` 预览图直链；必要时再尝试 DeepSeek Fetch。最终只发送模型选中且通过检查的图片；找不到可用图片时明确说明。文字和每张图片都会引用调用者消息；图片下载到临时目录，发送后删除。无需提供 DeepSeek 网页 Cookie；不要把 Cookie 粘贴到聊天或仓库中。
 
 `#sl` 状态查询仅限全局超级管理员。本项目不会在 `/help` 或其他自动提示中公布该入口。必须先在 SnowLuma WebUI 的 OneBot 配置中关闭其原生状态命令；若直接编辑 SnowLuma 当前账号生效的 `config/onebot.json`，将 `statusCommand.enabled` 设为 `false` 后重启 SnowLuma。SnowLuma 原生命令在转发事件到 NoneBot 之前就会回复，单靠本项目无法限制它。关闭原生命令后，本项目会处理 `#sl`：超管看到 SnowLuma 在线状态和运行秒数，普通成员静默。
 

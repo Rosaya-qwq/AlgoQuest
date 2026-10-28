@@ -17,7 +17,7 @@ from bot.services.deepseek import (
     _config,
     deepseek_api_lock,
     deepseek_base_url,
-    deepseek_max_tokens,
+    deepseek_judge_max_tokens,
     deepseek_model_for,
     deepseek_timeout_seconds,
 )
@@ -459,18 +459,33 @@ async def _chat_for_submission(prompt: str, *, difficulty_key: str = "") -> str:
             {"role": "system", "content": _SUBMISSION_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.1,
-        "max_tokens": deepseek_max_tokens(),
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "high",
+        "response_format": {"type": "json_object"},
+        "max_tokens": deepseek_judge_max_tokens(),
     }
     async with deepseek_api_lock():
         async with httpx.AsyncClient(timeout=deepseek_timeout_seconds()) as client:
-            response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"].strip()
+            for attempt in range(2):
+                response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+                response.raise_for_status()
+                try:
+                    choice = response.json()["choices"][0]
+                    content = choice["message"]["content"]
+                except (ValueError, KeyError, IndexError, TypeError) as exc:
+                    raise RuntimeError("DeepSeek 未返回有效的评审结果。") from exc
+                if choice.get("finish_reason") == "length":
+                    if attempt == 0 and payload["max_tokens"] < 131072:
+                        payload["max_tokens"] = min(131072, payload["max_tokens"] * 2)
+                        continue
+                    raise RuntimeError("DeepSeek 评审因推理预算耗尽被截断，未计入判题结果。")
+                if not isinstance(content, str) or not content.strip():
+                    raise RuntimeError("DeepSeek 返回空评审结果，未计入判题结果。")
+                return content.strip()
+    raise RuntimeError("DeepSeek 未完成评审。")
 
 
-_SUBMISSION_SYSTEM_PROMPT = """你是 Codeforces /submit 思路评审器。用户会用中文或英文口胡做法，你要判断他是否已经知道这题怎么做。
+_SUBMISSION_SYSTEM_PROMPT = """你是 Codeforces / AtCoder /submit 思路评审器。用户会用中文或英文口胡做法，你要判断他是否已经知道这题怎么做。
 
 输入只包含：
 - 题面、限制、样例和说明
@@ -498,14 +513,15 @@ _SUBMISSION_SYSTEM_PROMPT = """你是 Codeforces /submit 思路评审器。用�
 - 只是提问、求提示、闲聊或无关内容。
 
 平衡原则：
-具体关键想法足够；完整递推式、完整证明、完整代码不需要。
+题目特定的关键想法和关键性质的证明思路足够；完整形式化证明、完整实现和完整代码不需要。
 不要因为口胡、省略边界、没写全实现细节而拒绝。
-如果核心思路链条可辨认且没有明显致命错误，倾向 ACCEPTED。
+如果核心思路链条可辨认，关键性质有有效理由，且验证没有致命错误，才可以 ACCEPTED。
 如果只是关键词汤，或者你必须替他补一个题目特定关键想法，才拒绝。
 
 官方题解参考：
 如果输入里提供了官方 tutorial / editorial 摘录，它是判断“题目特定关键点”的优先参考。
-当用户的口胡思路和官方题解主线、关键转化、关键性质或构造方向基本一致时，应提高置信度并倾向 ACCEPTED。
+当用户的口胡与官方题解主线基本一致，且关键性质的理由成立、没有关键遗漏或逻辑冲突时，应提高置信度。
+方向或关键词相同不能代替正确性检查，也不能代替关键性质的证明思路。
 不要要求用户复述官方题解的所有细节、边界、实现步骤或完整证明。
 如果用户说到了官方题解依赖的关键性质，只需有证明思路或理由轮廓；不要要求严密边界讨论。
 如果官方摘录没有覆盖当前题、内容不完整或抓取混入其他题解，则退回只按题面和用户提交判断。
@@ -568,6 +584,16 @@ AND/XOR、严格/非严格不等式、重数、平局规则等会改变答案的
 标准数据结构怎么维护、常见图算法怎么跑、普通前缀和怎么写，默认会。
 如果实际构造/删除/转移的核心已经清楚，不要要求完整严密证明。
 
+关键性质和独立验证（必须执行）：
+- 若整个解法依赖非平凡的周期、分块分布、单调性、最优性或递推不变量，用户必须说明为何成立的思路。
+- 仅写“显然”“打表发现”“可以归纳”“和题解一样”而没有归纳对象/保持关系/有效理由，不算证明思路。
+- 不要求完整代数细节或边界，但不能替用户补出支撑算法的关键证明。标准数据结构复杂度等常识不要求证明。
+- 按题面定义独立核对全部样例，再构造至少两组不同的小数据，对照用户实际提出的算法；不能把自己的正确算法当成用户算法来测试。
+- 两组额外数据应覆盖核心分支或关键性质，至少一组不是样例的简单复制。数学式中的会改变答案的等号、严格不等号不能当作可省略边界。
+- 如果只写了泛化做法，无法执行或明确还缺关键步骤，标记 UNKNOWN/INCOMPLETE，禁止自行补齐后判通过。
+- 任一明确反例或复杂度失败都不能 ACCEPTED；关键性质没有证明思路也不能 ACCEPTED。
+- checks 中理解、核心逻辑、样例、两组额外检查、证明思路和复杂度应与 verdict 一致。UNKNOWN 不可用于通过。
+
 致命错误：
 如果用户误解题意、简单反例能击穿、关键比较符号错、构造无法输出所需对象、模型没有表达题面限制、复杂度明显不匹配，应判未通过。
 只有在上下文非常明确时才把符号错误当笔误；否则按错误处理。
@@ -610,7 +636,8 @@ def _build_review_prompt(
             "content": tutorial_text[:MAX_REVIEW_TUTORIAL_CHARS],
             "policy": (
                 "可选官方题解参考。若 submission 与此摘录的题解主线基本一致，"
-                "应提高置信度并倾向通过；但输出中不能泄露正确做法、核心结论或修正路线。"
+                "且关键性质有有效理由并通过独立验证，才提高置信度；不能因方向相同就放行。"
+                "输出中不能泄露正确做法、核心结论或修正路线。"
             ),
         },
         "submission": user_solution[:MAX_REVIEW_SUBMISSION_CHARS],
@@ -620,8 +647,19 @@ def _build_review_prompt(
             "verdict": "ACCEPTED | WRONG_ANSWER | INCOMPLETE | UNCERTAIN",
             "score": 0.0,
             "confidence": 0.0,
+            "checks": {
+                "understanding": "PASS | FAIL | UNKNOWN",
+                "key_logic": "PASS | FAIL | UNKNOWN",
+                "samples": "PASS | FAIL | UNKNOWN | NOT_APPLICABLE",
+                "extra_tests": "PASS | FAIL | UNKNOWN",
+                "proof": "PASS | FAIL | UNKNOWN | NOT_APPLICABLE",
+                "complexity": "PASS | FAIL | UNKNOWN",
+            },
             "sample_simulation": "只写样例是否与思路一致的结论，不写推理过程",
-            "extra_tests": ["只写额外检查结论1，不写过程", "只写额外检查结论2，不写过程"],
+            "extra_tests": [
+                "额外小数据1的输入、按题意得到的期望、用户算法的输出及一致性（不写推导过程）",
+                "额外小数据2的输入、按题意得到的期望、用户算法的输出及一致性（不写推导过程）",
+            ],
             "proof_check": "关键性质/证明思路是否足够的结论",
             "complexity_check": "复杂度量级是否匹配的结论",
             "issues": ["只指出错误点/缺失点，不给正确做法"],
@@ -676,10 +714,42 @@ def _parse_review_payload(payload: dict[str, Any]) -> SubmissionReview:
         verdict = "UNCERTAIN"
     score = _clamp(_as_float(payload.get("score"), 0.0), 0.0, 1.0)
     confidence = _clamp(_as_float(payload.get("confidence"), 0.0), 0.0, 1.0)
+    gate_feedback: list[str] = []
     if verdict == "ACCEPTED" and score < 0.6:
         verdict = "INCOMPLETE"
-    elif verdict != "ACCEPTED" and score >= 0.82 and confidence >= 0.65:
-        verdict = "ACCEPTED"
+        gate_feedback.append("评审分数与通过结论不一致，本次未确认通过。")
+    elif verdict == "ACCEPTED":
+        checks = payload.get("checks")
+        if not isinstance(checks, dict) or confidence < 0.65:
+            verdict = "UNCERTAIN"
+            gate_feedback.append("评审的核验结果缺失或置信度不足，暂不能确认通过。")
+        else:
+            allowed = {
+                "understanding": {"PASS"},
+                "key_logic": {"PASS"},
+                "samples": {"PASS", "NOT_APPLICABLE"},
+                "extra_tests": {"PASS"},
+                "proof": {"PASS", "NOT_APPLICABLE"},
+                "complexity": {"PASS"},
+            }
+            if any(checks.get(key) == "FAIL" for key in ("understanding", "key_logic", "samples", "extra_tests", "complexity")):
+                verdict = "WRONG_ANSWER"
+            elif any(not isinstance(checks.get(key), str) or checks[key] not in values for key, values in allowed.items()):
+                verdict = "INCOMPLETE"
+            elif len(_as_text_list(payload.get("extra_tests"))) < 2:
+                verdict = "INCOMPLETE"
+            if verdict != "ACCEPTED":
+                labels = {
+                    "understanding": "题意理解", "key_logic": "核心逻辑", "samples": "样例核验",
+                    "extra_tests": "额外小数据核验", "proof": "关键性质的证明思路", "complexity": "复杂度",
+                }
+                gate_feedback.extend(
+                    f"评审未确认{labels[key]}成立。"
+                    for key, values in allowed.items()
+                    if not isinstance(checks.get(key), str) or checks[key] not in values
+                )
+                if len(_as_text_list(payload.get("extra_tests"))) < 2:
+                    gate_feedback.append("评审未完成两组额外小数据核验。")
 
     extra_tests = payload.get("extra_tests")
     issues = payload.get("issues")
@@ -692,10 +762,10 @@ def _parse_review_payload(payload: dict[str, Any]) -> SubmissionReview:
         extra_tests=_as_text_list(extra_tests)[:4],
         proof_check=_as_text(payload.get("proof_check"), "未提供证明检查。"),
         complexity_check=_as_text(payload.get("complexity_check"), "未提供复杂度检查。"),
-        issues=_as_text_list(issues),
+        issues=gate_feedback + _as_text_list(issues),
         suggestions=_as_text_list(suggestions),
-        summary=_as_text(payload.get("summary"), "未提供总结。"),
-        safe_feedback=_as_text_list(payload.get("safe_feedback")),
+        summary="本次提交未满足评审通过条件。" if gate_feedback else _as_text(payload.get("summary"), "未提供总结。"),
+        safe_feedback=gate_feedback or _as_text_list(payload.get("safe_feedback")),
     )
 
 
