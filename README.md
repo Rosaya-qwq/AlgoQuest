@@ -78,11 +78,22 @@ AT_RATING_IMPOSSIBLE=3000,inf
 
 `/search` 使用同一个 `DEEPSEEK_API_KEY` 和 `deepseek-flash` 模型。先审查本次输入，再使用 DeepSeek Search API 联网查找网页；回答时开启 `thinking:enabled`、`reasoning_effort:high`，保留原始提问与高清输入图片，并将最多 8 条搜索结果的摘要/正文送给模型。`DEEPSEEK_SEARCH_MAX_TOKENS` 控制推理加回答的输出预算（默认 65536）；若回答仍因预算耗尽被截断，会以不超过 131072 tokens 的预算重试一次，可能额外消耗 API 额度。`DEEPSEEK_SEARCH_PAGE_CHARS` 控制每条网页正文最大字符数（默认 12000）。判题/翻译仍使用自己的配置。搜索前后会审查明确违规内容，审查失败时不会发送未经审查的回复。每次调用不继承之前消息。Search/Fetch API 可能单独计费，参见 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
 
-支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先结合本次文字和图片提取精确检索词，再传给 Search API。解算法题时原图会再次提供给回答模型，提示它核对题意、约束和样例；不相关的网页不能当作题解。找图请求会排除 GitHub 网页，先从搜索结果找图片；对萌娘百科/萌娘共享、B 站等受信任站点的结果，还会读取公开页面的 `og:image` 或 `twitter:image` 预览图直链；必要时再尝试 DeepSeek Fetch。最终只发送模型选中且通过检查的图片；找不到可用图片时明确说明。文字和每张图片都会引用调用者消息；图片下载到临时目录，发送后删除。无需提供 DeepSeek 网页 Cookie；不要把 Cookie 粘贴到聊天或仓库中。
+支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先结合本次文字和图片提取精确检索词，再传给 Search API。解算法题时原图会再次提供给回答模型，提示它核对题意、约束和样例；不相关的网页不能当作题解。找图请求会排除 GitHub 网页，先从搜索结果找图片；对萌娘百科/萌娘共享、B 站等受信任站点的结果，还会读取公开页面的 `og:image` 或 `twitter:image` 预览图直链，检查全部结果而不只检查前五条。萌娘共享文件的编辑/历史记录会转换为正常文件页，只跟随受信任站点的有限次 HTTPS 重定向；必要时再尝试 DeepSeek Fetch。仍没有图片时，最多追加一次原图/图片文件检索（会额外消耗 Search/Fetch 额度）；模型遗漏图片引用时，会独立核对候选图片是否匹配。最终只发送模型选中且通过检查的图片；找不到可用图片时明确说明。文字和每张图片都会引用调用者消息；图片下载到临时目录，发送后删除。如果图片都下载失败，会明确通知而不是静默跳过。无需提供 DeepSeek 网页 Cookie；不要把 Cookie 粘贴到聊天或仓库中。
 
 `#sl` 状态查询仅限全局超级管理员。本项目不会在 `/help` 或其他自动提示中公布该入口。必须先在 SnowLuma WebUI 的 OneBot 配置中关闭其原生状态命令；若直接编辑 SnowLuma 当前账号生效的 `config/onebot.json`，将 `statusCommand.enabled` 设为 `false` 后重启 SnowLuma。SnowLuma 原生命令在转发事件到 NoneBot 之前就会回复，单靠本项目无法限制它。关闭原生命令后，本项目会处理 `#sl`：超管看到 SnowLuma 在线状态和运行秒数，普通成员静默。
 
 若 `/search` 提示 HTTP 400，更新版会同时显示失败阶段（内容审查、图片识别、网页搜索或生成摘要）和 DeepSeek 返回的错误原因，并隐藏错误中的图片链接。图文搜索在内容审查阶段报图片读取失败时，检查 QQ 图片地址是否可由 DeepSeek 服务器访问；可先用纯文字 `/search` 判断文字请求是否正常。不要把带令牌的图片链接或 API Key 发到群里。
+
+#### 在服务器核对找图流程
+
+`verify_search.py` 调用与 Bot 完全相同的 `search_web()` 和图片下载校验函数，读取此目录的 `.env`；不会启动 QQ 连接或发送群消息，也不会修改榜单。它会真实调用并消耗 API 额度，不需要额外提供 Cookie。独立进程之间不共享内存中的 AI 锁，建议先停止 Bot 服务再验证，避免同时请求 API。下面的命令连续验证三次，只有每次都获得可下载图片才返回成功：
+
+```bash
+cd ~/AlgoQuest
+.venv/bin/python verify_search.py '帮我找一张海泽莉塔的图片' --repeat 3
+```
+
+请把目录换成服务器实际安装位置。日志中的 `pipeline=image-fallback-v2`、模型名和 API 主机用于确认加载了新代码；日志不会打印密钥或思考过程。`Search results` / `extracted candidates` / `selected` / `approved` 分别记录检索、提取、选择和审查数量；Bot 还会记录 `Search image delivery` 的实际发送数量。没有新版标记时先确认已更新代码并重启 Bot 服务；有候选但 `approved=0` 表示未选中或未通过检查；`approved>0` 但 `sent=0` 表示服务器下载失败。不同服务器的网络和搜索结果可能不同，因此本地一次成功不能代替服务器验证。此脚本验证到下载为止，QQ 实际发送仍需在群里测试。
 
 搜索开关保存在各群配置中，旧群配置自动按 `search:disable` 处理。超级管理员在目标群输入：
 

@@ -47,6 +47,7 @@ async def handle_search(bot: Bot, event: Event, args: Message = CommandArg()) ->
 
     await bot.send(event, _reply_prefix(event) + MessageSegment.text(reply.text))
     if reply.image_urls:
+        sent_images = 0
         with tempfile.TemporaryDirectory(prefix="algoquest-search-") as temp_dir:
             async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
                 for index, image_url in enumerate(reply.image_urls[:MAX_IMAGES], start=1):
@@ -54,13 +55,21 @@ async def handle_search(bot: Bot, event: Event, args: Message = CommandArg()) ->
                         image_data, suffix = await _download_image(client, image_url)
                         image_path = Path(temp_dir) / f"image-{index}{suffix}"
                         image_path.write_bytes(image_data)
-                    except Exception:
-                        logger.warning(f"Skipped unavailable search image {index}")
+                    except Exception as exc:
+                        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+                        logger.warning(
+                            "Search image download failed: index={} error={} status={}",
+                            index, type(exc).__name__, status,
+                        )
                         continue
                     await bot.send(
                         event,
                         _reply_prefix(event) + MessageSegment.image(image_path.resolve().as_uri()),
                     )
+                    sent_images += 1
+        logger.info("Search image delivery: requested={} sent={}", len(reply.image_urls), sent_images)
+        if not sent_images:
+            await bot.send(event, _reply_prefix(event) + MessageSegment.text("已找到图片，但服务器下载失败，请稍后重试。"))
     await search_cmd.finish()
 
 

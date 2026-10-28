@@ -227,6 +227,136 @@ def test_moegirl_file_page_uses_og_image(monkeypatch) -> None:
     assert reply.image_urls == ("https://storage.moegirl.org.cn/moegirl/commons/e/ea/Hazelita.jpg",)
 
 
+def test_image_search_retries_with_file_query_when_first_search_has_only_pages(monkeypatch) -> None:
+    calls, reply = _run_search(
+        monkeypatch,
+        [
+            _chat('{"allowed": true}'),
+            {"results": [{"title": "截图专栏", "url": "https://example.com/article"}]},
+            {"content": "只有文章，没有图片"},
+            {"results": [{
+                "title": "角色原图", "url": "https://example.com/gallery",
+                "content": "![角色](https://example.com/character.jpg)",
+            }]},
+            _chat("角色图片 [图片1]。"),
+            _chat('{"allowed": true}'),
+            _chat('{"allowed": true}'),
+        ],
+        query="帮我找一张角色图片",
+    )
+    assert calls[3][0].endswith("/v1/tools/search")
+    assert "原图 图片文件" in calls[3][1]["query"]
+    assert reply.image_urls == ("https://example.com/character.jpg",)
+
+
+def test_image_search_retries_even_when_first_search_is_empty(monkeypatch) -> None:
+    calls, reply = _run_search(
+        monkeypatch,
+        [
+            _chat('{"allowed": true}'),
+            {"results": []},
+            {"results": [{"url": "https://example.com/character.jpg"}]},
+            _chat("图片 [图片1]。"),
+            _chat('{"allowed": true}'),
+            _chat('{"allowed": true}'),
+        ],
+        query="找张角色图片",
+    )
+    assert calls[2][0].endswith("/v1/tools/search")
+    assert reply.image_urls == ("https://example.com/character.jpg",)
+
+
+def test_image_selection_fallback_when_answer_fails_to_reference_candidates(monkeypatch) -> None:
+    calls, reply = _run_search(
+        monkeypatch,
+        [
+            _chat('{"allowed": true}'),
+            {"results": [{"url": "https://example.com/character.jpg"}]},
+            _chat("我只有网页，没有可展示的图片。"),
+            _chat('{"selected": [true, "1", -1, 1, 9]}'),
+            _chat('{"allowed": true}'),
+            _chat('{"allowed": true}'),
+        ],
+        query="找一张角色图片",
+    )
+    assert reply.image_urls == ("https://example.com/character.jpg",)
+    assert "我只有网页" not in reply.text
+    assert "[图片1]" in reply.text
+    assert calls[3][1]["messages"][1]["content"][1]["image_url"]["url"] == reply.image_urls[0]
+
+
+def test_image_selection_does_not_send_unrelated_candidates(monkeypatch) -> None:
+    _calls, reply = _run_search(
+        monkeypatch,
+        [
+            _chat('{"allowed": true}'),
+            {"results": [{"url": "https://example.com/unrelated.jpg"}]},
+            _chat("这张候选不是用户要的角色。"),
+            _chat('{"selected": []}'),
+            _chat('{"allowed": true}'),
+        ],
+        query="找一张角色图片",
+    )
+    assert reply.image_urls == ()
+
+
+def test_file_history_preview_loads_normal_file_page_and_validates_redirects() -> None:
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        if len(calls) == 1:
+            assert "action=" not in str(request.url)
+            assert "oldid=" not in str(request.url)
+            return httpx.Response(302, headers={"location": "/File:Character.jpg"})
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=(
+            '<meta property="og:image" content="https://storage.moegirl.org.cn/character.jpg">'
+        ))
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await web_search._page_preview_image(
+                client, "https://commons.moegirl.org.cn/index.php?title=File:Character.jpg&action=history&oldid=10",
+            )
+
+    assert asyncio.run(run()) == "https://storage.moegirl.org.cn/character.jpg"
+    assert len(calls) == 2
+
+
+def test_preview_does_not_follow_untrusted_redirect() -> None:
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(302, headers={"location": "http://127.0.0.1/private"})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await web_search._page_preview_image(client, "https://commons.moegirl.org.cn/File:Character.jpg")
+
+    assert asyncio.run(run()) is None
+    assert len(calls) == 1
+
+
+def test_preview_scans_beyond_first_five_search_results(monkeypatch) -> None:
+    visited = []
+
+    async def preview(client, url):
+        visited.append(url)
+        return "https://example.com/character.jpg" if url.endswith("/6") else None
+
+    monkeypatch.setattr(web_search, "_page_preview_image", preview)
+
+    async def run():
+        async with httpx.AsyncClient() as client:
+            return await web_search._find_page_images(
+                client, "https://api.deepseek.com", {}, [{"url": f"https://example.com/{i}"} for i in range(8)],
+            )
+
+    assert asyncio.run(run()) == ["https://example.com/character.jpg"]
+    assert len(visited) == 8
+
+
 def test_truncated_answer_retries_once_with_larger_budget(monkeypatch) -> None:
     calls = []
     replies = iter([
