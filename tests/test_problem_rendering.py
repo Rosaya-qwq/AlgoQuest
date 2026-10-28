@@ -218,19 +218,18 @@ def test_deepseek_markdown_parser_accepts_hash_heading_levels() -> None:
     ]
 
 
-def test_deepseek_translation_model_is_independent_from_judge_model(monkeypatch) -> None:
+def test_deepseek_uses_one_model_for_all_tasks(monkeypatch) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-    monkeypatch.setenv("DEEPSEEK_MODEL", "custom-judge-model")
-    monkeypatch.delenv("DEEPSEEK_TRANSLATION_MODEL", raising=False)
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("DEEPSEEK_TRANSLATION_MODEL", "custom-translation-model")
+    monkeypatch.setenv("DEEPSEEK_JUDGE_MODEL_IMPOSSIBLE", "deepseek-v4-pro")
 
     client = DeepSeekClient()
 
     assert client._model == "deepseek-flash"
-
-    monkeypatch.setenv("DEEPSEEK_TRANSLATION_MODEL", "custom-translation-model")
-    client = DeepSeekClient()
-
-    assert client._model == "custom-translation-model"
+    from bot.services.deepseek import deepseek_model_for
+    assert deepseek_model_for("judge", "impossible") == "deepseek-flash"
+    assert deepseek_model_for("solution", "hard") == "deepseek-flash"
 
 
 def test_deepseek_defaults_use_flash_for_every_difficulty(monkeypatch) -> None:

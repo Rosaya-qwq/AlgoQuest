@@ -88,6 +88,7 @@ async def handle_config(event: Event) -> None:
 
 def _init_usage() -> str:
     return (
-        "用法：/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable>\n"
-        "例如：/init algo:enable rank:self giveup:2 emoji:disable"
+        "用法：/init <algo:enable|disable> <rank:self|all> <giveup:count> "
+        "<emoji:enable|disable> <search:enable|disable>\n"
+        "例如：/init algo:enable rank:self giveup:2 emoji:disable search:disable"
     )

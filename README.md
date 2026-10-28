@@ -32,9 +32,10 @@
 - `/submit <cf|at> <难度> <题解描述>`：在当前群 `algo:enable` 时可用，提交当前难度题目的题解描述，由 DeepSeek 进行思路评审，并更新本地 rating 与难度计数。
 - `/pass <cf|at> <难度>`：在当前群 `algo:enable` 时，本群群管理或全局超管回复用户提交消息，强制通过当前题；不能手动输入 uid，一血已产生时无效。
 - `/rank`：在当前群 `algo:enable` 时可用；`rank:self` 时普通用户只能查看自己，`rank:all` 时全体可查看全体排行榜，本群群管理和全局超管始终可查看全体。图片包含头像、用户名、uid、CF/AT rating 和五档难度通过数。
+- `/search [关键词] [图片]`：在当前群 `search:enable` 时可用，`/serach` 同义；使用 DeepSeek 联网搜索并附来源。政治相关和 R18G 关键词或回复会被拒绝；每次调用无聊天上下文。
 - `/emoji <表情或ID>`：在当前群 `emoji:enable` 时可用；全局超管任意时刻可用。给本条消息贴同款 QQ 表情；如果引用某条消息，则只给被引用的消息贴表情。群成员单独发送一个 Unicode 表情或 QQ 表情时，也会触发跟贴；全局超管发送 Unicode 表情且贴成功后会自动学习绑定。`/emoji 368` 这类数字会直接作为 SnowLuma / OneBot 表情回应 ID 尝试贴上，不可用时返回“表情不可用”。手动给某条消息贴表情时，机器人会尝试给同一条消息贴同款表情；失败时静默。`/emoji <表情>=<ID>` 可以绑定 Unicode 表情与贴表情 ID，`/emoji <表情>!=<ID>` 删除绑定；绑定左侧必须是单个 Unicode 表情，右侧必须全为数字，变体选择符会被规范化去重。未绑定 Unicode 表情会尝试用 Unicode 十进制码点作为 ID，贴成功后自动绑定。
-- `/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable>`：超级管理员覆盖当前群配置。新群默认不可调用 bot，除全局超管外。
-- `/config`：超级管理员查看当前群配置。
+- `/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> <search:enable|disable>`：超级管理员覆盖当前群配置。新群默认各功能关闭，除全局超管外不可调用 bot。
+- `/config`：查看当前群配置，输出一行可直接复制执行的 `/init ...` 命令。
 
 ## DeepSeek AI 评审 / 中文翻译 / LaTeX 公式渲染 启用说明
 
@@ -48,23 +49,6 @@
 ```env
 DEEPSEEK_API_KEY=你的API Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-flash
-DEEPSEEK_JUDGE_MODEL_CHECK_IN=deepseek-flash
-DEEPSEEK_JUDGE_MODEL_EASY=deepseek-flash
-DEEPSEEK_JUDGE_MODEL_MEDIUM=deepseek-flash
-DEEPSEEK_JUDGE_MODEL_HARD=deepseek-flash
-DEEPSEEK_JUDGE_MODEL_IMPOSSIBLE=deepseek-flash
-DEEPSEEK_SOLUTION_MODEL_CHECK_IN=deepseek-flash
-DEEPSEEK_SOLUTION_MODEL_EASY=deepseek-flash
-DEEPSEEK_SOLUTION_MODEL_MEDIUM=deepseek-flash
-DEEPSEEK_SOLUTION_MODEL_HARD=deepseek-flash
-DEEPSEEK_SOLUTION_MODEL_IMPOSSIBLE=deepseek-flash
-DEEPSEEK_TRANSLATION_MODEL=deepseek-flash
-DEEPSEEK_TRANSLATION_MODEL_CHECK_IN=deepseek-flash
-DEEPSEEK_TRANSLATION_MODEL_EASY=deepseek-flash
-DEEPSEEK_TRANSLATION_MODEL_MEDIUM=deepseek-flash
-DEEPSEEK_TRANSLATION_MODEL_HARD=deepseek-flash
-DEEPSEEK_TRANSLATION_MODEL_IMPOSSIBLE=deepseek-flash
 DEEPSEEK_TRANSLATION_ENABLED=true
 DEEPSEEK_TIMEOUT_SECONDS=900
 DEEPSEEK_MAX_TOKENS=24000
@@ -82,6 +66,20 @@ AT_RATING_IMPOSSIBLE=3000,inf
 ```
 
 `ALGOQUEST_DATA_DIR` 默认留空即可，此时运行数据固定存放在项目根目录的 `data/` 下，不受 systemd `WorkingDirectory` 影响。只有当你想把榜单、群配置、题目缓存等运行数据单独放到别的磁盘时，才需要填写绝对路径，例如 `/var/lib/algoquest`。
+
+### DeepSeek 联网搜索
+
+`/search` 使用同一个 `DEEPSEEK_API_KEY`。它先调用 DeepSeek Search API 获取网页结果，再由 `deepseek-flash` 生成简体中文摘要，最后附上来源链接。搜索前审查本次文字和图片，发送前再次审查完整回复；政治相关或 R18G 内容会拒绝，审查接口异常时也不会发送未经审查的内容。每次请求只包含本次消息及本次搜索结果，不保存对话历史。Search API 可能单独计费，请查看 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
+
+支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先把本次文字和图片一起交给 `deepseek-flash`，提取综合搜索关键词，再传给 Search API。搜索结果正文若包含相关图片，模型可以在回复中引用图片编号；Bot 最多发送 5 张，文字和每张图片都会引用调用者消息。图片在临时目录下载，发送结束后删除；链接失效则跳过该图片。
+
+搜索开关保存在各群配置中，旧群配置自动按 `search:disable` 处理。超级管理员在目标群输入：
+
+```text
+/init algo:enable rank:self giveup:2 emoji:disable search:enable
+```
+
+要关闭搜索，把末尾改成 `search:disable`。其他四项请按该群实际配置填写；先用 `/config` 获取完整的可复制命令再修改。全局超级管理员不受群功能开关限制。新群默认 `search:disable`。
 
 ### 个性化文案配置
 
@@ -128,12 +126,11 @@ AT_RATING_IMPOSSIBLE=3000,inf
 ```
 
 ### DeepSeek 中文翻译
-在 `.env` 中配置以下四项后重启 bot：
+在 `.env` 中配置以下三项后重启 bot：
 
 ```env
 DEEPSEEK_API_KEY=你的API Key      # 必填
 DEEPSEEK_BASE_URL=https://api.deepseek.com   # 默认值，可改
-DEEPSEEK_TRANSLATION_MODEL=deepseek-flash # 题面中文翻译模型
 DEEPSEEK_TRANSLATION_ENABLED=true # 设为 true 启用题面中文翻译
 ```
 
@@ -142,7 +139,7 @@ DEEPSEEK_TRANSLATION_ENABLED=true # 设为 true 启用题面中文翻译
 - 旧变量 `DEEPSEEK_OBFUSCATION=true` 仍兼容为“启用翻译”，但不会再混淆题面
 - API 调用失败时自动回退为原始题面，不影响 `/giveup` 正常使用
 - 所有 DeepSeek 调用共用一个异步锁；同一时刻只会发送一个翻译、题解或判题请求，适合 2 核 2G 服务器。
-- 翻译、判题和题解在全部难度下统一使用 `deepseek-flash`。旧配置中的 `deepseek-v4-flash` 和 `deepseek-v4-pro` 会自动映射到新模型名，仍建议同步更新服务器 `.env`。
+- 翻译、判题、题解和搜索在全部难度下固定使用 `deepseek-flash`。旧版 `.env` 中的分任务、分难度模型变量已不再参与选模；部署时可删除这些旧行。
 - `DEEPSEEK_BASE_URL` 留空时自动使用 `https://api.deepseek.com`；填写自定义地址时必须包含 `http://` 或 `https://`，且只填写 API 根地址，不要追加 `/chat/completions`。
 
 **首次启用翻译后**，旧缓存题目仍是英文的。执行以下命令清除缓存：

@@ -21,9 +21,6 @@ if _env_path.exists():
 
 DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY"
 DEEPSEEK_BASE_URL = "DEEPSEEK_BASE_URL"
-DEEPSEEK_MODEL = "DEEPSEEK_MODEL"
-DEEPSEEK_TRANSLATION_MODEL = "DEEPSEEK_TRANSLATION_MODEL"
-DEEPSEEK_SOLUTION_MODEL = "DEEPSEEK_SOLUTION_MODEL"
 DEEPSEEK_TRANSLATION_ENABLED = "DEEPSEEK_TRANSLATION_ENABLED"
 DEEPSEEK_OBFUSCATION = "DEEPSEEK_OBFUSCATION"
 DEEPSEEK_TIMEOUT_SECONDS = "DEEPSEEK_TIMEOUT_SECONDS"
@@ -32,10 +29,6 @@ DEEPSEEK_MAX_TOKENS = "DEEPSEEK_MAX_TOKENS"
 DEFAULT_TIMEOUT_SECONDS = 900.0
 DEFAULT_MAX_TOKENS = 24000
 DEFAULT_FLASH_MODEL = "deepseek-flash"
-LEGACY_MODEL_ALIASES = {
-    "deepseek-v4-flash": DEFAULT_FLASH_MODEL,
-    "deepseek-v4-pro": DEFAULT_FLASH_MODEL,
-}
 _DEEPSEEK_API_LOCKS: dict[int, asyncio.Lock] = {}
 
 
@@ -82,24 +75,7 @@ def deepseek_api_lock() -> asyncio.Lock:
 
 
 def deepseek_model_for(kind: str, difficulty_key: str | None = None, default: str = DEFAULT_FLASH_MODEL) -> str:
-    normalized_kind = kind.upper()
-    normalized_difficulty = (difficulty_key or "").upper().replace("-", "_")
-    keys: list[str] = []
-    if normalized_difficulty:
-        keys.append(f"DEEPSEEK_{normalized_kind}_MODEL_{normalized_difficulty}")
-    keys.append(f"DEEPSEEK_{normalized_kind}_MODEL")
-    if kind == "judge":
-        keys.append(DEEPSEEK_MODEL)
-    elif kind == "translation":
-        keys.append(DEEPSEEK_TRANSLATION_MODEL)
-    elif kind == "solution":
-        keys.append(DEEPSEEK_SOLUTION_MODEL)
-        keys.append(DEEPSEEK_MODEL)
-    for key in keys:
-        value = _config(key).strip()
-        if value:
-            return LEGACY_MODEL_ALIASES.get(value, value)
-    return LEGACY_MODEL_ALIASES.get(default, default)
+    return DEFAULT_FLASH_MODEL
 
 
 def is_translation_enabled() -> bool:

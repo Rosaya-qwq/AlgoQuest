@@ -10,8 +10,8 @@ ADMIN_HELP_TEXT = """/giveup <cf|at> <难度> - 立即放弃当前题，揭示�
 /add <uid> - 将用户加入黑名单
 /remove <uid> - 将用户移出黑名单
 /del <uid> - 超级管理员删除某个用户的榜单数据
-/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> - 超级管理员覆盖当前群配置
-/config - 超级管理员查看当前群配置
+/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> <search:enable|disable> - 超级管理员覆盖当前群配置
+/config - 查看当前群配置，可复制输出的 /init 命令供超级管理员修改
 /emoji <表情或ID> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情；单独发送单个 Unicode/QQ 表情也会自动触发
 /emoji <表情>=<ID> / <表情>!=<ID> - 超级管理员绑定或删除 Unicode 表情对应的贴表情 ID，未绑定时会尝试十进制码点并成功后自动绑定"""
 
@@ -33,4 +33,6 @@ def group_help_text(config: GroupConfig) -> str:
         )
     if config.emoji_enabled:
         lines.append("/emoji <表情或ID> - 给消息贴同款 QQ 表情")
+    if config.search_enabled:
+        lines.append("/search [关键词] [图片] - 联网搜索（/serach 同义）")
     return "\n".join(lines)
