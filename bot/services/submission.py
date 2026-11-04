@@ -69,7 +69,7 @@ class SubmissionReview:
 
     @property
     def accepted(self) -> bool:
-        return self.verdict == "ACCEPTED" and self.score >= 0.6
+        return self.verdict == "ACCEPTED" and self.score >= 0.5
 
 
 @dataclass(frozen=True)
@@ -498,6 +498,10 @@ _SUBMISSION_SYSTEM_PROMPT = """你是 Codeforces / AtCoder /submit 思路评审�
 
 判题目标：
 你不是要求完整题解、完整证明或完整实现。你只判断用户文本里是否有足够“题目特定”的关键信息，能说明他真的知道解法。
+默认倾向：当你能从用户文本重构出正确做法，且没有发现确切反例或确切逻辑错误时，应判 ACCEPTED。
+不要因为“说得不够详细”“没有写证明”“没有列边界”“担心他其实不懂”这类不确定就拒绝；
+只有在你确实找到致命错误、确实缺少某个你必须替他发明的题目特定关键点时才拒绝。
+拿不准但方向正确、核心关键点已出现时，给 ACCEPTED 并给出相对较高的置信度，而不是 UNCERTAIN。
 
 接受：
 - 关键观察、模型、状态、构造或核心转化已经出现。
@@ -715,41 +719,28 @@ def _parse_review_payload(payload: dict[str, Any]) -> SubmissionReview:
     score = _clamp(_as_float(payload.get("score"), 0.0), 0.0, 1.0)
     confidence = _clamp(_as_float(payload.get("confidence"), 0.0), 0.0, 1.0)
     gate_feedback: list[str] = []
-    if verdict == "ACCEPTED" and score < 0.6:
+    if verdict == "ACCEPTED" and score < 0.5:
         verdict = "INCOMPLETE"
         gate_feedback.append("评审分数与通过结论不一致，本次未确认通过。")
     elif verdict == "ACCEPTED":
         checks = payload.get("checks")
-        if not isinstance(checks, dict) or confidence < 0.65:
+        if not isinstance(checks, dict) or confidence < 0.5:
             verdict = "UNCERTAIN"
             gate_feedback.append("评审的核验结果缺失或置信度不足，暂不能确认通过。")
         else:
-            allowed = {
-                "understanding": {"PASS"},
-                "key_logic": {"PASS"},
-                "samples": {"PASS", "NOT_APPLICABLE"},
-                "extra_tests": {"PASS"},
-                "proof": {"PASS", "NOT_APPLICABLE"},
-                "complexity": {"PASS"},
-            }
-            if any(checks.get(key) == "FAIL" for key in ("understanding", "key_logic", "samples", "extra_tests", "complexity")):
+            # Only an explicit FAIL on a core correctness check blocks acceptance.
+            # UNKNOWN / missing checks and an incomplete extra_tests list are
+            # treated as "not disproven" rather than as rejections, so口胡
+            # 但核心思路成立的提交不会被机械门槛卡掉。
+            core_fail_keys = ("understanding", "key_logic", "samples", "extra_tests", "proof", "complexity")
+            failed = [key for key in core_fail_keys if checks.get(key) == "FAIL"]
+            if failed:
                 verdict = "WRONG_ANSWER"
-            elif any(not isinstance(checks.get(key), str) or checks[key] not in values for key, values in allowed.items()):
-                verdict = "INCOMPLETE"
-            elif len(_as_text_list(payload.get("extra_tests"))) < 2:
-                verdict = "INCOMPLETE"
-            if verdict != "ACCEPTED":
                 labels = {
                     "understanding": "题意理解", "key_logic": "核心逻辑", "samples": "样例核验",
                     "extra_tests": "额外小数据核验", "proof": "关键性质的证明思路", "complexity": "复杂度",
                 }
-                gate_feedback.extend(
-                    f"评审未确认{labels[key]}成立。"
-                    for key, values in allowed.items()
-                    if not isinstance(checks.get(key), str) or checks[key] not in values
-                )
-                if len(_as_text_list(payload.get("extra_tests"))) < 2:
-                    gate_feedback.append("评审未完成两组额外小数据核验。")
+                gate_feedback.extend(f"评审判定{labels[key]}不成立。" for key in failed)
 
     extra_tests = payload.get("extra_tests")
     issues = payload.get("issues")

@@ -53,6 +53,7 @@ DEEPSEEK_TRANSLATION_ENABLED=true
 DEEPSEEK_TIMEOUT_SECONDS=1800
 DEEPSEEK_MAX_TOKENS=24000
 DEEPSEEK_SEARCH_MAX_TOKENS=65536
+DEEPSEEK_SEARCH_FAST_MAX_TOKENS=4096
 DEEPSEEK_SEARCH_PAGE_CHARS=12000
 DEEPSEEK_JUDGE_MAX_TOKENS=65536
 ALGOQUEST_DATA_DIR=
@@ -70,13 +71,23 @@ AT_RATING_IMPOSSIBLE=3000,inf
 
 `ALGOQUEST_DATA_DIR` 默认留空即可，此时运行数据固定存放在项目根目录的 `data/` 下，不受 systemd `WorkingDirectory` 影响。只有当你想把榜单、群配置、题目缓存等运行数据单独放到别的磁盘时，才需要填写绝对路径，例如 `/var/lib/algoquest`。
 
-判题使用 `deepseek-flash` 的高强度思考和 JSON 输出模式；`DEEPSEEK_JUDGE_MAX_TOKENS` 是独立的推理加回答预算，默认 65536。被截断时最多扩大预算到 131072 并重试一次，异常或空结果不会写入榜单。`DEEPSEEK_TIMEOUT_SECONDS` 默认 1800 秒。思路评审允许省略常规实现细节，但支撑算法的非平凡性质需要有效的证明轮廓；仅写“显然”或“和题解一样”不算证明。评审会独立核对样例、两组额外小数据、核心逻辑、证明和复杂度；结果缺失、未知或失败时不能自动通过，也不再因评分高而把未通过改成通过。每次只评审本次提交，仍共用 AI 锁；用户回复不展示内部思考或详细模拟过程。AI 思路评审不等于编译运行程序的 OJ 判题，不能保证覆盖所有反例。
+判题使用 `deepseek-flash` 的高强度思考和 JSON 输出模式；`DEEPSEEK_JUDGE_MAX_TOKENS` 是独立的推理加回答预算，默认 65536。被截断时最多扩大预算到 131072 并重试一次，异常或空结果不会写入榜单。`DEEPSEEK_TIMEOUT_SECONDS` 默认 1800 秒。
+
+**判题宽严度**（已放宽，减少误杀）：系统提示要求评审默认倾向通过——当它能从用户文本重构出正确做法、且没有发现确切反例或确切逻辑错误时就判 ACCEPTED，不因「说得不够详细/没写证明/担心其实不懂」这类不确定而拒绝。机械门槛层面，只有某个核心核验项（题意理解、核心逻辑、样例、额外小数据、证明思路、复杂度）被显式判为 `FAIL` 才会拦截；`UNKNOWN`、空值或缺失一律视为「未被推翻」而不再降级，也不再强制要求两组额外小数据。通过阈值为 `score ≥ 0.5` 且 `confidence ≥ 0.5`（原为 0.6 / 0.65）。`checks` 整体缺失仍记为 UNCERTAIN（说明评审没有真正核验）。每次只评审本次提交，仍共用 AI 锁；用户回复不展示内部思考或详细模拟过程。AI 思路评审不等于编译运行程序的 OJ 判题，不能保证覆盖所有反例。
 
 修改 `.env` 后需要重启 bot 服务。`.env` 不随 Git 提交；服务器使用自己的 `.env`，更新源码不会自动覆盖服务器密钥或本地配置。
 
 ### DeepSeek 联网搜索
 
-`/search` 使用同一个 `DEEPSEEK_API_KEY` 和 `deepseek-flash` 模型。先审查本次输入，再使用 DeepSeek Search API 联网查找网页；回答时开启 `thinking:enabled`、`reasoning_effort:high`，保留原始提问与高清输入图片，并将最多 8 条搜索结果的摘要/正文送给模型。`DEEPSEEK_SEARCH_MAX_TOKENS` 控制推理加回答的输出预算（默认 65536）；若回答仍因预算耗尽被截断，会以不超过 131072 tokens 的预算重试一次，可能额外消耗 API 额度。`DEEPSEEK_SEARCH_PAGE_CHARS` 控制每条网页正文最大字符数（默认 12000）。判题/翻译仍使用自己的配置。搜索前后会审查明确违规内容，审查失败时不会发送未经审查的回复。每次调用不继承之前消息。Search/Fetch API 可能单独计费，参见 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
+`/search` 使用同一个 `DEEPSEEK_API_KEY` 和 `deepseek-flash` 模型。先审查本次输入，再使用 DeepSeek Search API 联网查找网页；保留原始提问与高清输入图片，并将最多 8 条搜索结果的摘要/正文送给模型。
+
+**速度分流**：只有在提问是算法题（命中「怎么做/题解/复杂度/证明/样例/做法/思路」等关键词）或带图片时才开启 `thinking:enabled` + `reasoning_effort:high` 深度推理，此时输出预算由 `DEEPSEEK_SEARCH_MAX_TOKENS` 控制（默认 65536）。普通文字搜索关闭 thinking，预算由 `DEEPSEEK_SEARCH_FAST_MAX_TOKENS` 控制（默认 4096，范围 1024–16384），因此日常查询会明显更快、更省额度。两种模式被截断时都会用翻倍预算重试一次（快速模式上限 16384、深度模式上限 131072）。
+
+**时效性**：回答系统提示会注入当前日期（UTC+8），要求对新闻、版本、价格、赛事、榜单、人物现状等问题优先采用最近发布的资料并标注信息时间，若资料明显陈旧要指出其时效性，避免把过时内容当作最新事实。
+
+**图片化输出**：搜索回复会复用题面渲染管线（`bot/services/web_search.py::render_search_image` → `_parse_markdown_blocks` + `build_html` + `render_html_to_png`）渲染成 PNG 发送，支持标题、列表、代码块和 LaTeX 公式。渲染结果缓存在 `data/search/search-<hash>.png`。渲染失败时自动回退为纯文字，不会吞掉结果。模型找到的配图仍单独作为图片消息发送。
+
+`DEEPSEEK_SEARCH_PAGE_CHARS` 控制每条网页正文最大字符数（默认 12000）。判题/翻译仍使用自己的配置。搜索前后会审查明确违规内容，审查失败时不会发送未经审查的回复。每次调用不继承之前消息。Search/Fetch API 可能单独计费，参见 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
 
 支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先结合本次文字和图片提取精确检索词，再传给 Search API。解算法题时原图会再次提供给回答模型，提示它核对题意、约束和样例；不相关的网页不能当作题解。找图请求会排除 GitHub 网页，先从搜索结果找图片；对萌娘百科/萌娘共享、B 站等受信任站点的结果，还会读取公开页面的 `og:image` 或 `twitter:image` 预览图直链，检查全部结果而不只检查前五条。萌娘共享文件的编辑/历史记录会转换为正常文件页，只跟随受信任站点的有限次 HTTPS 重定向；必要时再尝试 DeepSeek Fetch。仍没有图片时，最多追加一次原图/图片文件检索（会额外消耗 Search/Fetch 额度）；模型遗漏图片引用时，会独立核对候选图片是否匹配。最终只发送模型选中且通过检查的图片；找不到可用图片时明确说明。文字和每张图片都会引用调用者消息；图片下载到临时目录，发送后删除。如果图片都下载失败，会明确通知而不是静默跳过。无需提供 DeepSeek 网页 Cookie；不要把 Cookie 粘贴到聊天或仓库中。
 

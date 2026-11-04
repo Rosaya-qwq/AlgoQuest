@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
@@ -56,6 +57,25 @@ _ANSWER_SYSTEM_PROMPT = (
     "若资料中提供了有帮助的图片候选，可在回答中使用 [图片1] 等编号引用，最多 5 张；"
     "不要自行编造图片地址。"
 )
+_FRESHNESS_SUFFIX = (
+    "今天的日期是 {today}（UTC+8）。涉及时效性的问题（新闻、版本、价格、赛事、榜单、人物现状等），"
+    "优先采用最近发布的资料，明确写出信息对应的时间；"
+    "若资料明显陈旧或与当前时间相去甚远，应指出其时效性，不要把过时内容当作最新事实。"
+)
+
+
+def _answer_system_prompt() -> str:
+    today = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y年%m月%d日")
+    return _ANSWER_SYSTEM_PROMPT + _FRESHNESS_SUFFIX.format(today=today)
+
+
+_ALGORITHM_QUESTION_RE = re.compile(
+    r"怎么做|如何解|题解|算法题|这道题|这题|求解|复杂度|证明|时间限制|样例|做法|思路"
+)
+
+
+def _is_algorithm_question(question: str) -> bool:
+    return bool(_ALGORITHM_QUESTION_RE.search(question))
 _IMAGE_QUERY_SYSTEM_PROMPT = (
     "结合本次文字和图片输出最多 128 字的搜索关键词，不要解释。"
     "算法题必须提取图片中可辨认的独特原句、人物名、关键操作、约束或样例，"
@@ -68,6 +88,34 @@ _IMAGE_SELECTION_SYSTEM_PROMPT = (
     "仅输出 JSON 对象 {\"selected\": [1]}，编号与候选表一致，最多选五张；"
     "没有匹配图片时返回空数组。不要输出思考过程或其他文字。"
 )
+
+
+async def render_search_image(text: str):
+    """Render a search reply (markdown) to a PNG, reusing the problem renderer.
+
+    Returns a ``Path`` to the rendered image. Raises on render failure so the
+    caller can fall back to plain text.
+    """
+    import hashlib
+
+    from bot.services.deepseek import _parse_markdown_blocks
+    from bot.services.html_render import build_html, render_html_to_png
+    from bot.services.paths import runtime_data_dir
+
+    today = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+    blocks = _parse_markdown_blocks(text)
+    html = build_html(
+        title="联网搜索结果",
+        subtitle=f"DeepSeek · {today} (UTC+8)",
+        blocks=blocks,
+        footer_text="DeepSeek 联网搜索",
+    )
+    out_dir = runtime_data_dir() / "search"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    output_path = out_dir / f"search-{digest}.png"
+    await render_html_to_png(html, output_path)
+    return output_path
 
 
 class SearchRejected(Exception):
@@ -431,19 +479,28 @@ async def search_web(raw_query: str, input_image_urls: tuple[str, ...] = ()) -> 
                 f"{image_text}"
             )
             answer_images = tuple((list(input_image_urls) + (image_candidates if wants_images else []))[:MAX_IMAGES])
-            budget = _search_limit("DEEPSEEK_SEARCH_MAX_TOKENS", 65536, 4096, 131072)
+            # Deep reasoning is only worth its latency for algorithm questions or
+            # when images need to be read; plain web lookups answer much faster
+            # with thinking disabled and a modest token budget.
+            answer_thinking = _is_algorithm_question(raw_query) or bool(answer_images)
+            answer_prompt = _answer_system_prompt()
+            if answer_thinking:
+                budget = _search_limit("DEEPSEEK_SEARCH_MAX_TOKENS", 65536, 4096, 131072)
+            else:
+                budget = _search_limit("DEEPSEEK_SEARCH_FAST_MAX_TOKENS", 4096, 1024, 16384)
             try:
                 answer = await _chat(
-                    client, base_url, headers, _ANSWER_SYSTEM_PROMPT, answer_user,
-                    answer_images, stage="生成摘要", thinking=True, max_tokens=budget,
+                    client, base_url, headers, answer_prompt, answer_user,
+                    answer_images, stage="生成摘要", thinking=answer_thinking, max_tokens=budget,
                 )
             except SearchTruncated:
-                if budget >= 131072:
+                retry_budget = min(budget * 2, 131072 if answer_thinking else 16384)
+                if retry_budget <= budget:
                     raise RuntimeError("DeepSeek 推理或回答在最大预算内仍被截断。") from None
                 try:
                     answer = await _chat(
-                        client, base_url, headers, _ANSWER_SYSTEM_PROMPT, answer_user,
-                        answer_images, stage="生成摘要", thinking=True, max_tokens=min(budget * 2, 131072),
+                        client, base_url, headers, answer_prompt, answer_user,
+                        answer_images, stage="生成摘要", thinking=answer_thinking, max_tokens=retry_budget,
                     )
                 except SearchTruncated as exc:
                     raise RuntimeError("DeepSeek 推理或回答在重试后仍被截断。") from exc

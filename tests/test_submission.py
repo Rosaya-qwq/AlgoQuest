@@ -704,22 +704,36 @@ def _passing_review_payload() -> dict:
     }
 
 
-def test_accept_requires_all_checks_and_two_extra_tests() -> None:
+def test_missing_checks_is_uncertain_not_accepted() -> None:
     payload = _passing_review_payload()
     assert submission._parse_review_payload(payload).accepted
     del payload["checks"]
+    # Absent checks mean the judge did not core-verify, so stay UNCERTAIN.
     assert not submission._parse_review_payload(payload).accepted
+
+
+def test_single_extra_test_is_still_accepted() -> None:
+    # The loosened gate no longer demands two extra tests; a correct outline
+    # with one (or zero) extra checks still passes.
     payload = _passing_review_payload()
     payload["extra_tests"] = ["只有一组数据。"]
-    assert not submission._parse_review_payload(payload).accepted
+    assert submission._parse_review_payload(payload).accepted
+
+
+def test_unknown_or_empty_checks_are_not_rejected() -> None:
+    # Only an explicit FAIL blocks; UNKNOWN / missing values are "not disproven".
+    for value in ("UNKNOWN", "", None, []):
+        for key in ("understanding", "key_logic", "samples", "extra_tests", "proof", "complexity"):
+            payload = _passing_review_payload()
+            payload["checks"][key] = value
+            assert submission._parse_review_payload(payload).accepted, (key, value)
 
 
 @pytest.mark.parametrize("key", ["understanding", "key_logic", "samples", "extra_tests", "proof", "complexity"])
-def test_failed_or_unknown_checks_cannot_be_accepted(key: str) -> None:
-    for value in ("FAIL", "UNKNOWN", "", None, []):
-        payload = _passing_review_payload()
-        payload["checks"][key] = value
-        assert not submission._parse_review_payload(payload).accepted
+def test_explicit_fail_checks_cannot_be_accepted(key: str) -> None:
+    payload = _passing_review_payload()
+    payload["checks"][key] = "FAIL"
+    assert not submission._parse_review_payload(payload).accepted
 
 
 def test_correct_outline_can_omit_routine_proof() -> None:

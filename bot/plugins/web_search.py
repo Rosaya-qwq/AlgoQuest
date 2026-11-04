@@ -18,7 +18,7 @@ from PIL import Image
 
 from bot.services.group_config import search_enabled_for_event
 from bot.services.permissions import is_superuser
-from bot.services.web_search import MAX_IMAGES, SearchRejected, search_web
+from bot.services.web_search import MAX_IMAGES, SearchRejected, render_search_image, search_web
 
 
 __plugin_meta__ = PluginMetadata(
@@ -45,7 +45,15 @@ async def handle_search(bot: Bot, event: Event, args: Message = CommandArg()) ->
         logger.exception("DeepSeek web search failed")
         await search_cmd.finish(_reply_prefix(event) + MessageSegment.text(f"搜索失败：{exc}"))
 
-    await bot.send(event, _reply_prefix(event) + MessageSegment.text(reply.text))
+    try:
+        rendered_path = await render_search_image(reply.text)
+        await bot.send(
+            event,
+            _reply_prefix(event) + MessageSegment.image(rendered_path.resolve().as_uri()),
+        )
+    except Exception:
+        logger.exception("Search result rendering failed; falling back to text")
+        await bot.send(event, _reply_prefix(event) + MessageSegment.text(reply.text))
     if reply.image_urls:
         sent_images = 0
         with tempfile.TemporaryDirectory(prefix="algoquest-search-") as temp_dir:
