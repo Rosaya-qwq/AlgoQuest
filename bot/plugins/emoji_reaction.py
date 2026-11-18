@@ -16,13 +16,15 @@ from bot.services.emoji_reaction import (
     set_unicode_emoji_binding,
 )
 from bot.services.group_config import emoji_enabled_for_event
+from bot.services.emoji_rename import quoted_media, renamed_media
+from bot.services.message_refs import quoted_message, reply_message_id as _reply_message_id
 from bot.services.permissions import is_superuser
 
 
 __plugin_meta__ = PluginMetadata(
-    name="表情回应",
-    description="超级管理员给消息贴 QQ 表情回应。",
-    usage="/emoji <表情或ID>",
+    name="表情回应与重命名",
+    description="贴 QQ 表情回应，或引用图片设置预览名称并重发。",
+    usage="/emoji <表情或ID>；引用图片：/emoji <名称>",
 )
 
 
@@ -34,6 +36,26 @@ emoji_like_notice = on_notice(priority=20, block=False)
 @emoji_cmd.handle()
 async def handle_emoji(bot: Bot, event: MessageEvent, args: Message = CommandArg()) -> None:
     superuser = is_superuser(event)
+    if (superuser or emoji_enabled_for_event(event)) and _reply_message_id(event) is not None:
+        try:
+            message = await quoted_message(bot, event)
+        except Exception as exc:
+            logger.warning(f"Cannot read quoted image for /emoji ({type(exc).__name__})")
+            await emoji_cmd.finish("无法读取引用消息，请重新引用图片或表情包。")
+        try:
+            media = quoted_media(message) if message is not None else None
+            renamed = renamed_media(media, args.extract_plain_text()) if media is not None else None
+        except ValueError as exc:
+            await emoji_cmd.finish(str(exc))
+        if renamed is not None:
+            try:
+                # A pure media message preserves the image's custom preview;
+                # adding a text caption would change the conversation preview.
+                await bot.send(event, Message(renamed))
+            except Exception as exc:
+                logger.warning(f"Cannot resend renamed emoji ({type(exc).__name__})")
+                await emoji_cmd.finish("重发失败：当前 QQ 桥接可能不支持该表情，或原图地址已失效。")
+            await emoji_cmd.finish()
     binding_action = parse_emoji_binding_action(args)
     if binding_action is not None:
         if not superuser:
@@ -120,17 +142,3 @@ async def _set_msg_emoji_like(bot: Bot, message_id: int | str, emoji_id: str) ->
         f"emoji_id={emoji_id}, error={last_error!r}"
     )
     return False
-
-
-def _reply_message_id(event: MessageEvent) -> int | str | None:
-    reply = getattr(event, "reply", None)
-    if reply is None:
-        return None
-    message_id = getattr(reply, "message_id", None)
-    if message_id is not None:
-        return message_id
-    segment = getattr(reply, "segment", None)
-    data = getattr(segment, "data", {}) if segment is not None else {}
-    if isinstance(data, dict):
-        return data.get("id")
-    return None

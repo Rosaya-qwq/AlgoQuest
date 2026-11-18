@@ -8,7 +8,7 @@ from nonebot.log import logger
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 
-from bot.plugins.problem_random import advance_problem, send_problem_image
+from bot.plugins.problem_random import advance_problem, send_problem_image, send_solution_image
 from bot.services.problem_random import (
     DIFFICULTIES_BY_SOURCE,
     difficulty_usage,
@@ -85,7 +85,7 @@ async def handle_submit(bot: Bot, event: Event, args: Message = CommandArg()) ->
         await _wait_submit_turn(queue_key, sequence)
         await submit_cmd.send(
             reply_prefix
-            + MessageSegment.text("正在评审你的本次提交：会检查样例、额外构造两组小数据、证明和复杂度，请稍候。")
+            + MessageSegment.text("正在评审本次提交的关键算法或构造、证明思路和复杂度，请稍候。")
         )
         try:
             review = await review_submission(
@@ -130,9 +130,11 @@ async def handle_submit(bot: Bot, event: Event, args: Message = CommandArg()) ->
                     review=review,
                     rating_update=rating_update,
                 )
-                + (_solution_brief_block(problem) if review.accepted else "")
             )
         )
+
+        if review.accepted:
+            await send_solution_image(bot, event, problem)
 
         if refresh_error is not None:
             await submit_cmd.finish(f"本题已通过，但刷新下一题失败：{refresh_error}")
@@ -194,12 +196,6 @@ async def handle_pass(bot: Bot, event: Event, args: Message = CommandArg()) -> N
         rating_eligible=True,
     )
     _first_blood_snapshot_keys.add(snapshot_key)
-    try:
-        next_problem = await advance_problem(difficulty_key, source=source)
-    except Exception as exc:
-        logger.exception("Failed to refresh next problem after /pass")
-        await pass_cmd.finish(f"已强制通过，但刷新下一题失败：{exc}")
-
     await pass_cmd.send(
         _reply_to_event(event)
         + MessageSegment.text(
@@ -209,9 +205,15 @@ async def handle_pass(bot: Bot, event: Event, args: Message = CommandArg()) -> N
                 review=review,
                 rating_update=rating_update,
             )
-            + _solution_brief_block(problem)
         )
     )
+    await send_solution_image(bot, event, problem)
+    try:
+        next_problem = await advance_problem(difficulty_key, source=source)
+    except Exception as exc:
+        logger.exception("Failed to refresh next problem after /pass")
+        await pass_cmd.finish(f"已强制通过，但刷新下一题失败：{exc}")
+
     await pass_cmd.send(_reply_to_event(event) + MessageSegment.text("已刷新下一题："))
     await send_problem_image(bot, event, next_problem)
     await pass_cmd.finish()
@@ -250,10 +252,6 @@ async def _leave_submit_turn(queue_key: str, sequence: int) -> None:
 
 def _queue_key(source: str, difficulty_key: str) -> str:
     return f"{source}:{difficulty_key}"
-
-
-def _solution_brief_block(problem) -> str:
-    return f"\n\n简要题解：\n{problem.ai_brief or '缓存题解为空。'}"
 
 
 def _forced_accept_review():

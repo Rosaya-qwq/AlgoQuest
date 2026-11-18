@@ -23,7 +23,7 @@
 
 ## 当前功能
 
-- `/ping`：检查机器人是否在线，返回 `pong`。
+- `/ping`：检查机器人是否在线；默认返回 `pong`，可在 `.env` 中配置为发送个人图片表情包。
 - `/help`：查看当前指令和各难度 rating 区间。
 - `/giveup <cf|at> <难度>`：在当前群 `algo:enable` 时可用，普通群成员按本群 `giveup:count` 投票放弃当前题；全局超管和本群群管理可直接放弃。放弃后揭示原题名称、链接、rating 和简要题解，然后刷新下一题。仍兼容 `/random`、`随机题` 别名。
 - `/add <uid>` / `/remove <uid>`：管理员维护黑名单，黑名单用户不能使用机器人指令。
@@ -32,10 +32,50 @@
 - `/submit <cf|at> <难度> <题解描述>`：在当前群 `algo:enable` 时可用，提交当前难度题目的题解描述，由 DeepSeek 进行思路评审，并更新本地 rating 与难度计数。
 - `/pass <cf|at> <难度>`：在当前群 `algo:enable` 时，本群群管理或全局超管回复用户提交消息，强制通过当前题；不能手动输入 uid，一血已产生时无效。
 - `/rank`：在当前群 `algo:enable` 时可用；`rank:self` 时普通用户只能查看自己，`rank:all` 时全体可查看全体排行榜，本群群管理和全局超管始终可查看全体。图片包含头像、用户名、uid、CF/AT rating 和五档难度通过数。
-- `/search [关键词] [图片]`：在当前群 `search:enable` 时可用；使用 DeepSeek 联网搜索并附来源。
 - `/emoji <表情或ID>`：在当前群 `emoji:enable` 时可用；全局超管任意时刻可用。给本条消息贴同款 QQ 表情；如果引用某条消息，则只给被引用的消息贴表情。群成员单独发送一个 Unicode 表情或 QQ 表情时，也会触发跟贴；全局超管发送 Unicode 表情且贴成功后会自动学习绑定。`/emoji 368` 这类数字会直接作为 SnowLuma / OneBot 表情回应 ID 尝试贴上，不可用时返回“表情不可用”。手动给某条消息贴表情时，机器人会尝试给同一条消息贴同款表情；失败时静默。`/emoji <表情>=<ID>` 可以绑定 Unicode 表情与贴表情 ID，`/emoji <表情>!=<ID>` 删除绑定；绑定左侧必须是单个 Unicode 表情，右侧必须全为数字，变体选择符会被规范化去重。未绑定 Unicode 表情会尝试用 Unicode 十进制码点作为 ID，贴成功后自动绑定。
-- `/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> <search:enable|disable>`：超级管理员覆盖当前群配置。新群默认各功能关闭，除全局超管外不可调用 bot。
+- `/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable>`：超级管理员覆盖当前群配置。新群默认各功能关闭，除全局超管外不可调用 bot。
 - `/config`：查看当前群配置，输出一行可直接复制执行的 `/init ...` 命令。
+- `/emoji <名称>`：引用单张图片或表情包，使用指定名称作为 QQ 预览摘要重发。例如引用图片发送 `/emoji 1`。引用普通文字时仍按原有规则贴表情回应。
+- `/star`：查询自己的收藏题单；`/star [+|-] <题号>` 添加或移除，省略符号默认添加。也可引用含题号的题解发送 `/star` 收藏、发送 `/star -` 移除。
+
+## 个人图片与题目收藏
+
+### `/ping` 图片表情包
+
+三个配置项放在同一段，便于测试和替换图片：
+
+```env
+ALGOQUEST_PING_IMAGE_ENABLED=true
+ALGOQUEST_PING_IMAGE_PATH=source/ping.png
+ALGOQUEST_PING_IMAGE_SUMMARY=pong
+```
+
+图片资源放在项目根目录的 `source/`，与服务器运行数据目录分开。相对路径以项目根目录为准，也可填写绝对路径或 HTTP(S) 图片 URL。部署时将 `source/ping.png` 连同代码同步，并在服务器 `.env` 中设置上述配置；`.env.example` 默认关闭图片模式。
+
+发送使用 `image` 消息的 `sub_type=1` 表情包模式，`summary` 使用配置中的文字。修改配置后重启机器人。关闭开关、文件不存在或图片发送失败时自动回退 `pong`。最终显示尺寸由 QQ 客户端控制。
+
+### `/emoji` 重命名预览文字
+
+引用只有一张图片或表情包的消息，发送 `/emoji 1`，机器人会沿用原图片地址或表情包标识重发，并将 `summary` 设为 `1`。该功能沿用 `emoji:enable` 和超级管理员权限规则。名称为 1–80 个字符；引用多张图片会提示重新选择。
+
+项目不会下载、收藏或建立表情文件缓存。普通图片及有图片地址的表情包按 `sub_type=1` 重发；仅有完整表情包元信息时使用原生 `mface`。SnowLuma/QQ 对 `summary` 的支持决定群聊外的最终预览效果，发送接口成功不能证明客户端一定采用该摘要；该效果需在 QQ 客户端测试。若图片地址失效或桥接拒绝消息，会明确提示发送失败。
+
+### `/star` 个人题单
+
+```text
+/star CF2062A
+/star + AT_arc017_1
+/star -CF2062A
+/star
+```
+
+收藏按 QQ 用户 ID 保存，同一用户在不同群共用一份题单，各用户互不影响；沿用 `algo:enable` 和超级管理员权限规则。重复添加不会重复记录，移除未收藏的题目不会影响其他用户。较长题单分条显示，包含题号与链接。
+
+题号支持 `CF2062A`、`2062A`、`AT_arc017_1`、`ATabc350_a`、`abc350_a` 等写法，也支持 Codeforces、AtCoder 和洛谷原题链接；统一显示为 `CF2062A`、`AT_arc017_1`。校验题号格式，不联网确认题目是否存在。
+
+引用题解发送 `/star` 默认添加，引用发送 `/star -` 移除。引用文本中出现多个不同题号时，要求直接指定一个。机器人会记录新发送的题解消息对应的题号，因此纯图片题解也可直接引用收藏，并支持机器人重启后识别。旧版纯图片消息没有关联记录且没有可读取的题号时，请直接输入题号。
+
+收藏与题解消息关联保存到运行数据目录的 `stars/stars.sqlite3`，默认路径为 `data/stars/stars.sqlite3`。数据库只保存用户 ID、题号、收藏时间以及机器人的题解消息 ID；不保存引用图片及其下载地址。
 
 ## DeepSeek AI 评审 / 中文翻译 / LaTeX 公式渲染 启用说明
 
@@ -52,9 +92,6 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_TRANSLATION_ENABLED=true
 DEEPSEEK_TIMEOUT_SECONDS=1800
 DEEPSEEK_MAX_TOKENS=24000
-DEEPSEEK_SEARCH_MAX_TOKENS=65536
-DEEPSEEK_SEARCH_FAST_MAX_TOKENS=4096
-DEEPSEEK_SEARCH_PAGE_CHARS=12000
 DEEPSEEK_JUDGE_MAX_TOKENS=65536
 ALGOQUEST_DATA_DIR=
 CF_RATING_CHECK_IN=0,1200
@@ -73,46 +110,31 @@ AT_RATING_IMPOSSIBLE=3000,inf
 
 判题使用 `deepseek-flash` 的高强度思考和 JSON 输出模式；`DEEPSEEK_JUDGE_MAX_TOKENS` 是独立的推理加回答预算，默认 65536。被截断时最多扩大预算到 131072 并重试一次，异常或空结果不会写入榜单。`DEEPSEEK_TIMEOUT_SECONDS` 默认 1800 秒。
 
-**判题宽严度**（已放宽，减少误杀）：系统提示要求评审默认倾向通过——当它能从用户文本重构出正确做法、且没有发现确切反例或确切逻辑错误时就判 ACCEPTED，不因「说得不够详细/没写证明/担心其实不懂」这类不确定而拒绝。机械门槛层面，只有某个核心核验项（题意理解、核心逻辑、样例、额外小数据、证明思路、复杂度）被显式判为 `FAIL` 才会拦截；`UNKNOWN`、空值或缺失一律视为「未被推翻」而不再降级，也不再强制要求两组额外小数据。通过阈值为 `score ≥ 0.5` 且 `confidence ≥ 0.5`（原为 0.6 / 0.65）。`checks` 整体缺失仍记为 UNCERTAIN（说明评审没有真正核验）。每次只评审本次提交，仍共用 AI 锁；用户回复不展示内部思考或详细模拟过程。AI 思路评审不等于编译运行程序的 OJ 判题，不能保证覆盖所有反例。
+**判题宽严度**：评审关键算法或具体构造，以及关键性质的证明思路。直观理由、交换思路、归纳方向或不变量的轮廓即可，不要求完整形式化证明、常规边界和实现细节。核心思路正确且没有确切反例时倾向通过；关键词堆砌、核心构造/证明缺失、明确逻辑错误和明显超限的复杂度仍不通过。不强制两组额外数据，辅助核验为 UNKNOWN 不会机械拒绝。checks 必须存在，score 与 confidence 至少 0.5；核心核验被明确判 FAIL 时不能通过。AI 思路评审不会编译运行程序。
 
 修改 `.env` 后需要重启 bot 服务。`.env` 不随 Git 提交；服务器使用自己的 `.env`，更新源码不会自动覆盖服务器密钥或本地配置。
 
-### DeepSeek 联网搜索
-
-`/search` 使用同一个 `DEEPSEEK_API_KEY` 和 `deepseek-flash` 模型。先审查本次输入，再使用 DeepSeek Search API 联网查找网页；保留原始提问与高清输入图片，并将最多 8 条搜索结果的摘要/正文送给模型。
-
-**速度分流**：只有在提问是算法题（命中「怎么做/题解/复杂度/证明/样例/做法/思路」等关键词）或带图片时才开启 `thinking:enabled` + `reasoning_effort:high` 深度推理，此时输出预算由 `DEEPSEEK_SEARCH_MAX_TOKENS` 控制（默认 65536）。普通文字搜索关闭 thinking，预算由 `DEEPSEEK_SEARCH_FAST_MAX_TOKENS` 控制（默认 4096，范围 1024–16384），因此日常查询会明显更快、更省额度。两种模式被截断时都会用翻倍预算重试一次（快速模式上限 16384、深度模式上限 131072）。
-
-**时效性**：回答系统提示会注入当前日期（UTC+8），要求对新闻、版本、价格、赛事、榜单、人物现状等问题优先采用最近发布的资料并标注信息时间，若资料明显陈旧要指出其时效性，避免把过时内容当作最新事实。
-
-**图片化输出**：搜索回复会复用题面渲染管线（`bot/services/web_search.py::render_search_image` → `_parse_markdown_blocks` + `build_html` + `render_html_to_png`）渲染成 PNG 发送，支持标题、列表、代码块和 LaTeX 公式。渲染结果缓存在 `data/search/search-<hash>.png`。渲染失败时自动回退为纯文字，不会吞掉结果。模型找到的配图仍单独作为图片消息发送。
-
-`DEEPSEEK_SEARCH_PAGE_CHARS` 控制每条网页正文最大字符数（默认 12000）。判题/翻译仍使用自己的配置。搜索前后会审查明确违规内容，审查失败时不会发送未经审查的回复。每次调用不继承之前消息。Search/Fetch API 可能单独计费，参见 [DeepSeek Search & Fetch 官方说明](https://api-docs.deepseek.com/guides/search/)。
-
-支持文字、图片或文字加图片。图片最多 5 张；只要带图片，Bot 会先结合本次文字和图片提取精确检索词，再传给 Search API。解算法题时原图会再次提供给回答模型，提示它核对题意、约束和样例；不相关的网页不能当作题解。找图请求会排除 GitHub 网页，先从搜索结果找图片；对萌娘百科/萌娘共享、B 站等受信任站点的结果，还会读取公开页面的 `og:image` 或 `twitter:image` 预览图直链，检查全部结果而不只检查前五条。萌娘共享文件的编辑/历史记录会转换为正常文件页，只跟随受信任站点的有限次 HTTPS 重定向；必要时再尝试 DeepSeek Fetch。仍没有图片时，最多追加一次原图/图片文件检索（会额外消耗 Search/Fetch 额度）；模型遗漏图片引用时，会独立核对候选图片是否匹配。最终只发送模型选中且通过检查的图片；找不到可用图片时明确说明。文字和每张图片都会引用调用者消息；图片下载到临时目录，发送后删除。如果图片都下载失败，会明确通知而不是静默跳过。无需提供 DeepSeek 网页 Cookie；不要把 Cookie 粘贴到聊天或仓库中。
-
 `#sl` 状态查询仅限全局超级管理员。本项目不会在 `/help` 或其他自动提示中公布该入口。必须先在 SnowLuma WebUI 的 OneBot 配置中关闭其原生状态命令；若直接编辑 SnowLuma 当前账号生效的 `config/onebot.json`，将 `statusCommand.enabled` 设为 `false` 后重启 SnowLuma。SnowLuma 原生命令在转发事件到 NoneBot 之前就会回复，单靠本项目无法限制它。关闭原生命令后，本项目会处理 `#sl`：超管看到 SnowLuma 在线状态和运行秒数，普通成员静默。
 
-若 `/search` 提示 HTTP 400，更新版会同时显示失败阶段（内容审查、图片识别、网页搜索或生成摘要）和 DeepSeek 返回的错误原因，并隐藏错误中的图片链接。图文搜索在内容审查阶段报图片读取失败时，检查 QQ 图片地址是否可由 DeepSeek 服务器访问；可先用纯文字 `/search` 判断文字请求是否正常。不要把带令牌的图片链接或 API Key 发到群里。
+### 洛谷参考题解与图片输出
 
-#### 在服务器核对找图流程
+在本地 `.env` 中配置 `LUOGU_COOKIE` 后，CF 和 AtCoder 判题、题解生成都会补充洛谷社区题解。CF 题号映射为 `CF1A`，AtCoder 保留完整任务 ID，例如 `AT_arc017_1`。
+题解列表固定使用 `?orderBy=time`，按分页数量读取最后一页并选最后一篇；若列表仅提供摘要，会继续读取原文章全文。参考内容以题面为准，不要求用户采用与参考相同的算法。
 
-`verify_search.py` 调用与 Bot 完全相同的 `search_web()` 和图片下载校验函数，读取此目录的 `.env`；不会启动 QQ 连接或发送群消息，也不会修改榜单。它会真实调用并消耗 API 额度，不需要额外提供 Cookie。独立进程之间不共享内存中的 AI 锁，建议先停止 Bot 服务再验证，避免同时请求 API。下面的命令连续验证三次，只有每次都获得可下载图片才返回成功：
-
-```bash
-cd ~/AlgoQuest
-.venv/bin/python verify_search.py '帮我找一张海泽莉塔的图片' --repeat 3
+```env
+LUOGU_SOLUTIONS_ENABLED=true
+LUOGU_COOKIE=
+LUOGU_SOLUTION_CACHE_TTL_SECONDS=604800
+TUTORIAL_IMAGE_TIMEOUT_SECONDS=30
 ```
 
-请把目录换成服务器实际安装位置。日志中的 `pipeline=image-fallback-v2`、模型名和 API 主机用于确认加载了新代码；日志不会打印密钥或思考过程。`Search results` / `extracted candidates` / `selected` / `approved` 分别记录检索、提取、选择和审查数量；Bot 还会记录 `Search image delivery` 的实际发送数量。没有新版标记时先确认已更新代码并重启 Bot 服务；有候选但 `approved=0` 表示未选中或未通过检查；`approved>0` 但 `sent=0` 表示服务器下载失败。不同服务器的网络和搜索结果可能不同，因此本地一次成功不能代替服务器验证。此脚本验证到下载为止，QQ 实际发送仍需在群里测试。
+Cookie 仅保存在不入 Git 的 `.env` 中，不会写入题解缓存或发送给图片站点。首次读取成功后，文字缓存到 `data/tutorials/luogu/`；默认七天内复用。登录失效、网络错误时使用已有缓存或官方题解，不阻断判题；无 Cookie 时不请求登录题解页。失败后等待五分钟再尝试。
 
-搜索开关保存在各群配置中，旧群配置自动按 `search:disable` 处理。超级管理员在目标群输入：
+放弃当前题、提交通过和管理员强制通过时，均发送支持 LaTeX、Markdown 的题解图片。参考配图下载到 `data/tutorials/images/`，以 data URI 嵌入图片，不依赖用户打开外链。生成题解中引用的配图保持段落位置；未引用的参考图片附在“参考题解配图”部分。最终 PNG 缓存于 `data/solutions/`。图片暂时不可下载时显示占位，下次会重试；渲染失败时回退文字。
 
-```text
-/init algo:enable rank:self giveup:2 emoji:disable search:enable
-```
+数学渲染首次下载固定版本 MathJax 完整 SVG 资源到 `data/render_assets/`，之后本地加载，无需每次访问 CDN 或下载数学字体。首次下载有三个镜像可回退；公式未渲染完成时不缓存含原始 LaTeX 的 PNG。
 
-要关闭搜索，把末尾改成 `search:disable`。其他四项请按该群实际配置填写；先用 `/config` 获取完整的可复制命令再修改。全局超级管理员不受群功能开关限制。新群默认 `search:disable`。
+新题自动使用翻译。此次渲染版本已递增至 19，重启后会按原有版本迁移机制重建旧题面和预备题缓存；榜单与题库缓存保留。更新配置和源码后需要重启 Bot。
 
 ### 个性化文案配置
 
@@ -172,7 +194,7 @@ DEEPSEEK_TRANSLATION_ENABLED=true # 设为 true 启用题面中文翻译
 - 旧变量 `DEEPSEEK_OBFUSCATION=true` 仍兼容为“启用翻译”，但不会再混淆题面
 - API 调用失败时自动回退为原始题面，不影响 `/giveup` 正常使用
 - 所有 DeepSeek 调用共用一个异步锁；同一时刻只会发送一个翻译、题解或判题请求，适合 2 核 2G 服务器。
-- 翻译、判题、题解和搜索在全部难度下固定使用 `deepseek-flash`。旧版 `.env` 中的分任务、分难度模型变量已不再参与选模；部署时可删除这些旧行。
+- 翻译、判题和题解在全部难度下固定使用 `deepseek-flash`。旧版 `.env` 中的分任务、分难度模型变量已不再参与选模；部署时可删除这些旧行。
 - `DEEPSEEK_BASE_URL` 留空时自动使用 `https://api.deepseek.com`；填写自定义地址时必须包含 `http://` 或 `https://`，且只填写 API 根地址，不要追加 `/chat/completions`。
 
 **首次启用翻译后**，旧缓存题目仍是英文的。执行以下命令清除缓存：

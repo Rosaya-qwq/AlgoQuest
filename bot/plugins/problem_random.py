@@ -100,8 +100,9 @@ async def handle_giveup(bot: Bot, event: Event, args: Message = CommandArg()) ->
             if old_problem is not None:
                 await giveup_cmd.send(
                     reply_prefix
-                    + MessageSegment.text(_format_giveup_message(old_problem, old_problem.ai_brief))
+                    + MessageSegment.text(_format_giveup_message(old_problem))
                 )
+                await send_solution_image(bot, event, old_problem)
             else:
                 await giveup_cmd.send(reply_prefix + MessageSegment.text("当前没有可揭示的题目，将直接准备下一题。"))
 
@@ -161,15 +162,14 @@ def _problem_info(problem: RenderedProblem) -> dict[str, object]:
     }
 
 
-def _format_giveup_message(problem: RenderedProblem, solution_brief: str) -> str:
+def _format_giveup_message(problem: RenderedProblem) -> str:
     prefix = "CF" if problem.source == "cf" else "AT"
     problem_id = f"{problem.contest_id}{problem.index}" if problem.source == "cf" else problem.index
     return (
         "已放弃当前题目。\n"
         f"原题：{prefix}{problem_id} - {problem.original_name}\n"
         f"rating：{problem.rating}\n"
-        f"链接：{problem.url}\n\n"
-        f"简要题解：\n{solution_brief or '缓存题解为空。'}"
+        f"链接：{problem.url}"
     )
 
 
@@ -191,3 +191,29 @@ async def send_problem_image(
             MessageSegment.image(Path(problem.statement_image).resolve().as_uri())
         ),
     )
+
+
+async def send_solution_image(bot: Bot, event: Event, problem: RenderedProblem) -> None:
+    from bot.services.solutions import render_solution_image
+    from bot.services.stars import ProblemId, record_solution_message
+
+    try:
+        image = await render_solution_image(problem)
+        result = await bot.send(event, _reply_to_event(event) + MessageSegment.image(image.resolve().as_uri()))
+    except Exception as exc:
+        logger.warning(f"Failed to render/send solution image ({type(exc).__name__})")
+        await bot.send(
+            event,
+            _reply_to_event(event) + MessageSegment.text(
+                f"{'CF' if problem.source == 'cf' else 'AT_'}{problem.key}\n"
+                "题解图片暂时无法生成，先发送文字题解：\n" + (problem.ai_brief or "暂无缓存题解。")
+            ),
+        )
+        return
+    # Keep only the problem ID and sent message ID, so image-only solutions can
+    # be bookmarked after a restart without OCR or copying attachment URLs.
+    if isinstance(result, dict) and result.get("message_id") is not None:
+        try:
+            record_solution_message(str(bot.self_id), result["message_id"], ProblemId(problem.source, problem.key))
+        except Exception as exc:
+            logger.warning(f"Cannot record solution message for /star ({type(exc).__name__})")

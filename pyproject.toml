@@ -33,7 +33,7 @@ plugins = [
     "bot.plugins.ranklist",
     "bot.plugins.blacklist",
     "bot.plugins.emoji_reaction",
-    "bot.plugins.web_search",
+    "bot.plugins.stars",
 ]
 plugin_dirs = []
 builtin_plugins = []

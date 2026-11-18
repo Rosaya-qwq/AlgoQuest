@@ -22,7 +22,6 @@ class GroupConfig:
     rank_mode: RankMode = "self"
     giveup_count: int = 2
     emoji_enabled: bool = False
-    search_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -31,7 +30,6 @@ class InitConfigArgs:
     rank_mode: RankMode
     giveup_count: int
     emoji_enabled: bool
-    search_enabled: bool
 
 
 DEFAULT_GROUP_CONFIG = GroupConfig()
@@ -62,7 +60,7 @@ def group_bot_enabled(group_id: str | int | None) -> bool:
     if not group_config_exists(group_id):
         return False
     config = get_group_config(group_id)
-    return config.algo_enabled or config.emoji_enabled or config.search_enabled
+    return config.algo_enabled or config.emoji_enabled
 
 
 def set_group_config(group_id: str | int, config: GroupConfig) -> None:
@@ -73,7 +71,7 @@ def set_group_config(group_id: str | int, config: GroupConfig) -> None:
 
 def parse_init_config_args(text: str) -> InitConfigArgs | None:
     tokens = text.split()
-    if len(tokens) != 5:
+    if len(tokens) != 4:
         return None
 
     parsed: dict[str, str] = {}
@@ -85,15 +83,14 @@ def parse_init_config_args(text: str) -> InitConfigArgs | None:
             return None
         parsed[key] = value
 
-    if set(parsed) != {"algo", "rank", "giveup", "emoji", "search"}:
+    if set(parsed) != {"algo", "rank", "giveup", "emoji"}:
         return None
 
     algo = _parse_enabled(parsed["algo"])
     emoji = _parse_enabled(parsed["emoji"])
-    search = _parse_enabled(parsed["search"])
     rank = parsed["rank"]
     giveup = parsed["giveup"]
-    if algo is None or emoji is None or search is None or rank not in {"self", "all"}:
+    if algo is None or emoji is None or rank not in {"self", "all"}:
         return None
     if not re.fullmatch(r"\d{1,3}", giveup):
         return None
@@ -106,7 +103,6 @@ def parse_init_config_args(text: str) -> InitConfigArgs | None:
         rank_mode=rank,  # type: ignore[arg-type]
         giveup_count=giveup_count,
         emoji_enabled=emoji,
-        search_enabled=search,
     )
 
 
@@ -116,7 +112,6 @@ def init_args_to_config(args: InitConfigArgs) -> GroupConfig:
         rank_mode=args.rank_mode,
         giveup_count=args.giveup_count,
         emoji_enabled=args.emoji_enabled,
-        search_enabled=args.search_enabled,
     )
 
 
@@ -125,8 +120,7 @@ def format_group_config(group_id: str | int | None, config: GroupConfig) -> str:
         f"/init algo:{_format_enabled(config.algo_enabled)} "
         f"rank:{config.rank_mode} "
         f"giveup:{config.giveup_count} "
-        f"emoji:{_format_enabled(config.emoji_enabled)} "
-        f"search:{_format_enabled(config.search_enabled)}"
+        f"emoji:{_format_enabled(config.emoji_enabled)}"
     )
 
 
@@ -136,10 +130,6 @@ def algo_enabled_for_event(event: Event) -> bool:
 
 def emoji_enabled_for_event(event: Event) -> bool:
     return get_group_config(group_id_from_event(event)).emoji_enabled
-
-
-def search_enabled_for_event(event: Event) -> bool:
-    return get_group_config(group_id_from_event(event)).search_enabled
 
 
 def rank_mode_for_event(event: Event) -> RankMode:
@@ -176,7 +166,6 @@ def _normalize_group_config(raw: Any) -> GroupConfig:
         rank_mode=rank_mode,
         giveup_count=giveup_count,
         emoji_enabled=bool(raw.get("emoji_enabled", DEFAULT_GROUP_CONFIG.emoji_enabled)),
-        search_enabled=bool(raw.get("search_enabled", DEFAULT_GROUP_CONFIG.search_enabled)),
     )
 
 

@@ -7,9 +7,39 @@ import re
 from pathlib import Path
 from typing import Any
 
+import httpx
 from nonebot.log import logger
 
+from bot.services.paths import runtime_data_dir
+
 _render_lock = asyncio.Lock()
+MATHJAX_CACHE_PATH = runtime_data_dir() / "render_assets/mathjax-3.2.2-tex-svg-full.js"
+MATHJAX_URLS = (
+    "https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg-full.js",
+    "https://unpkg.com/mathjax@3.2.2/es5/tex-svg-full.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg-full.js",
+)
+
+
+async def _mathjax_bundle() -> str:
+    if MATHJAX_CACHE_PATH.is_file():
+        return MATHJAX_CACHE_PATH.read_text(encoding="utf-8")
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        for url in MATHJAX_URLS:
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                script = response.text
+                if len(script) < 100000 or "MathJax" not in script:
+                    continue
+                MATHJAX_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                temporary = MATHJAX_CACHE_PATH.with_suffix(".tmp")
+                temporary.write_text(script, encoding="utf-8")
+                temporary.replace(MATHJAX_CACHE_PATH)
+                return script
+            except Exception as exc:
+                logger.warning(f"MathJax resource download failed ({type(exc).__name__}); trying fallback")
+    raise RuntimeError("数学公式渲染资源暂不可用，请稍后重试。")
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -163,15 +193,16 @@ def build_html(
         elif btype == "image":
             data_uri = block.get("data_uri", "")
             path = block.get("path", "")
+            alt = _escape_attr(block.get("text") or "problem image")
             if data_uri:
-                body_parts.append(f'<img src="{_escape_attr(data_uri)}" alt="problem image">')
+                body_parts.append(f'<img src="{_escape_attr(data_uri)}" alt="{alt}">')
             elif path:
                 try:
                     import base64
                     data = Path(path).read_bytes()
                     mime = "image/png" if path.endswith(".png") else "image/jpeg"
                     b64 = base64.b64encode(data).decode()
-                    body_parts.append(f'<img src="data:{mime};base64,{b64}" alt="problem image">')
+                    body_parts.append(f'<img src="data:{mime};base64,{b64}" alt="{alt}">')
                 except Exception:
                     pass
         elif btype == "note":
@@ -210,20 +241,25 @@ async def render_html_to_png(html: str, output_path: Path, *, width: int = 960) 
 
     async with _render_lock:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        mathjax = await _mathjax_bundle()
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
             )
             page = await browser.new_page(viewport={"width": width, "height": 800})
-            await page.set_content(html, wait_until="domcontentloaded", timeout=60000)
+            # Full SVG maths require no webfont requests.
+            local_html = re.sub(r'<script\s+src="[^"]*mathjax[^\"]*"[^>]*></script>', "", html, flags=re.IGNORECASE)
+            await page.set_content(local_html, wait_until="domcontentloaded", timeout=60000)
+            await page.add_script_tag(content=mathjax)
 
             try:
                 await page.wait_for_function(
                     "window.MATHJAX_READY === true", timeout=45000,
                 )
             except Exception:
-                logger.warning("MathJax did not signal ready in time; capturing anyway")
+                await browser.close()
+                raise RuntimeError("数学公式尚未渲染完成，未生成包含公式源码的图片。")
 
             try:
                 await page.evaluate(
@@ -231,6 +267,14 @@ async def render_html_to_png(html: str, output_path: Path, *, width: int = 960) 
                       if (document.fonts && document.fonts.ready) {
                         await document.fonts.ready;
                       }
+                      await Promise.all(Array.from(document.images).map(img => {
+                        if (img.complete) return Promise.resolve();
+                        return new Promise(resolve => {
+                          img.onload = resolve;
+                          img.onerror = resolve;
+                          setTimeout(resolve, 10000);
+                        });
+                      }));
                       if (window.MathJax && MathJax.typesetPromise) {
                         await MathJax.typesetPromise();
                       }
@@ -399,8 +443,10 @@ def _render_markdown_emphasis(inner: str) -> str:
 def _looks_like_math_emphasis(text: str) -> bool:
     if not text:
         return False
-    if text.startswith("$") and text.endswith("$"):
-        return True
+    if "$" in text:
+        return bool(re.fullmatch(r"\${1,2}[^$]+\${1,2}", text))
+    if re.search(r"[\u3400-\u9fff]", text):
+        return False
     if any(ch in text for ch in ("\\", "_", "^", "{", "}", "|")):
         return True
     if re.fullmatch(r"[A-Za-z]", text):

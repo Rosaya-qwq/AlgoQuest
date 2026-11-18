@@ -257,7 +257,7 @@ _SYSTEM_PROMPT = (
 
 
 _SOLUTION_BRIEF_SYSTEM_PROMPT = (
-    "你是算法竞赛题解助手。用户已经放弃当前题目，因此可以给出原题简要题解。"
+    "你是算法竞赛题解助手。当前题目已经结束，因此可以公开简要题解。"
     "必须使用简体中文回答。只输出简洁题解，不输出代码。"
     "内容包含核心观察、算法步骤和复杂度；如果题面信息不足，明确说明不确定。"
 )
@@ -301,18 +301,25 @@ def _build_solution_brief_prompt(
     tutorial_text: str = "",
     tutorial_url: str = "",
 ) -> str:
+    problem_id = (
+        f"{problem_info.get('contest_id', '')}{problem_info.get('index', '')}"
+        if problem_info.get("source", "cf") == "cf" else str(problem_info.get("index", ""))
+    )
     tutorial_block = ""
     if tutorial_text.strip():
         tutorial_block = (
-            "\n\n官方 tutorial / editorial 摘录（优先参考，如果和题面冲突以题面为准）：\n"
+            "\n\n官方 / 洛谷社区参考题解（核对后参考，如果和题面冲突以题面为准）：\n"
             f"链接：{tutorial_url or problem_info.get('tutorial_url', '')}\n"
             f"{tutorial_text[:16000]}"
         )
     return (
-        "请基于下面的 Codeforces 题面给出简要题解。\n"
-        "要求：使用简体中文；不要输出代码；控制在 4 到 8 句话；包含核心观察、主要算法步骤和复杂度。"
-        "如果提供了官方 tutorial / editorial 摘录，请优先按其中题解主线总结。\n\n"
-        f"原题：CF{problem_info.get('contest_id', '')}{problem_info.get('index', '')}\n"
+        "请基于下面的算法题面给出清晰的简要题解。\n"
+        "要求：使用简体中文；不要输出代码；按核心观察、具体算法或构造、证明思路、复杂度分段；"
+        "讲清关键步骤，不堆实现细节。公式使用 $...$ 或 $$...$$。"
+        "修复参考原文中不合法的 LaTeX 格式，保持数学含义。"
+        "如果提供了官方或洛谷社区题解，先核对是否匹配本题再总结。若参考中有配图，"
+        "可在对应段落保留原始 Markdown 图片引用，不要编造或修改图片地址。\n\n"
+        f"来源：{problem_info.get('source', 'cf')}；题号：{problem_id}\n"
         f"名称：{problem_info.get('name', '')}\n"
         f"rating：{problem_info.get('rating', '')}\n"
         f"tags：{', '.join(problem_info.get('tags', []) or [])}\n\n"

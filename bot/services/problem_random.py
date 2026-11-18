@@ -105,7 +105,7 @@ CODEFORCES_CLOUDSCRAPER_ENABLED = _env_text("CODEFORCES_CLOUDSCRAPER_ENABLED", "
     "1", "true", "yes", "enabled",
 }
 MAX_FETCH_ATTEMPTS = 10
-RENDER_VERSION = 18
+RENDER_VERSION = 19
 ATCODER_REGULAR_CONTEST_RE = re.compile(r"^(?:abc|arc|agc|atc)\d+$", re.IGNORECASE)
 DEFAULT_HTTP_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -1152,11 +1152,14 @@ async def _generate_cached_solution_brief(
     try:
         from bot.services.deepseek import generate_solution_brief
 
+        from bot.services.tutorials import problem_reference
+
+        reference = await problem_reference(problem, tutorial_text=tutorial_text, tutorial_url=tutorial_url)
         return await generate_solution_brief(
             _problem_ref_info(problem),
             statement_text,
-            tutorial_text=tutorial_text,
-            tutorial_url=tutorial_url,
+            tutorial_text=reference.content,
+            tutorial_url=reference.url,
             difficulty_key=difficulty_key,
         )
     except Exception:
@@ -1789,6 +1792,15 @@ async def _fetch_tutorial_text(
     if not nodes:
         nodes = soup.select(".blog-entry-content, .content")
 
+    for node in nodes:
+        _convert_math_elements(node)
+        for image in node.find_all("img"):
+            src = urljoin(tutorial_url, str(image.get("src") or ""))
+            alt = str(image.get("alt") or "参考题解配图").replace("]", "")
+            if src.startswith(("https://", "http://")):
+                image.replace_with(f"\n![{alt}]({src})\n")
+        for heading in node.find_all(["h1", "h2", "h3", "h4"]):
+            heading.replace_with(f"\n## {heading.get_text(' ', strip=True)}\n")
     texts = [
         _normalize_tutorial_text(node.get_text("\n", strip=True))
         for node in nodes
@@ -1827,9 +1839,13 @@ def _slice_tutorial_for_problem(text: str, problem: ProblemRef) -> str:
     if marker_pos < 0:
         return text[:20000]
 
-    start = max(0, marker_pos - 2000)
-    end = min(len(text), marker_pos + 16000)
-    return text[start:end]
+    start = text.rfind("\n", 0, marker_pos) + 1
+    next_heading = re.search(
+        r"(?m)^(?:##\s+)?(?:[A-Z][0-9]?\.\s+|(?:CF)?\d+[A-Z][0-9]?\b)",
+        text[marker_pos + 1:],
+    )
+    end = marker_pos + 1 + next_heading.start() if next_heading else len(text)
+    return text[start:min(end, start + 20000)]
 
 
 def _tutorial_markers(problem: ProblemRef) -> list[str]:

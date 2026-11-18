@@ -10,9 +10,11 @@ ADMIN_HELP_TEXT = """/giveup <cf|at> <难度> - 立即放弃当前题，揭示�
 /add <uid> - 将用户加入黑名单
 /remove <uid> - 将用户移出黑名单
 /del <uid> - 超级管理员删除某个用户的榜单数据
-/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> <search:enable|disable> - 超级管理员覆盖当前群配置
+/init <algo:enable|disable> <rank:self|all> <giveup:count> <emoji:enable|disable> - 超级管理员覆盖当前群配置
 /config - 查看当前群配置，可复制输出的 /init 命令供超级管理员修改
+/star [+-] [题号] - 个人收藏题单；省略参数查询，引用题解可收藏或移除
 /emoji <表情或ID> - 超级管理员给本条消息或被引用消息贴同款 QQ 表情；单独发送单个 Unicode/QQ 表情也会自动触发
+/emoji <名称> - 引用单张图片或表情包，修改 QQ 预览文字并重发
 /emoji <表情>=<ID> / <表情>!=<ID> - 超级管理员绑定或删除 Unicode 表情对应的贴表情 ID，未绑定时会尝试十进制码点并成功后自动绑定"""
 
 
@@ -27,12 +29,12 @@ def group_help_text(config: GroupConfig) -> str:
             [
                 "/cur <cf|at> <难度> - 重新发送当前题面",
                 "/submit <cf|at> <难度> <题解描述> - 提交题解描述并由 AI 评审",
+                "/star [+-] [题号] - 查看个人收藏，或添加/移除 CF、AT 题目；支持引用题解",
                 f"/giveup <cf|at> <难度> - 投票放弃当前题，{config.giveup_count} 名群成员同意后刷新",
                 "/rank - 查看自己的解题排行榜卡片" if config.rank_mode == "self" else "/rank - 查看全体排行榜卡片",
             ]
         )
     if config.emoji_enabled:
         lines.append("/emoji <表情或ID> - 给消息贴同款 QQ 表情")
-    if config.search_enabled:
-        lines.append("/search [关键词] [图片] - 联网搜索")
+        lines.append("/emoji <名称> - 引用单张图片或表情包，修改预览文字并重发")
     return "\n".join(lines)

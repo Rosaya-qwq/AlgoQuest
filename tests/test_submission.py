@@ -672,6 +672,38 @@ def test_review_prompt_includes_optional_tutorial_reference() -> None:
     assert "safe_feedback" in payload["output_schema"]
 
 
+def test_review_uses_cached_luogu_reference_and_accepts_outline(monkeypatch) -> None:
+    from bot.services import tutorials
+    from bot.services.tutorials import TutorialReference
+
+    problem = RenderedProblem(
+        contest_id=1, index="A", rating=1000, tags=[], original_name="Theatre Square",
+        url="https://codeforces.com/problemset/problem/1/A", difficulty="easy",
+        statement_image="unused", samples_image="unused", generated_at="now",
+    )
+    captured = []
+
+    async def reference(*args, **kwargs):
+        return TutorialReference(content="洛谷缓存：两维独立向上取整后相乘。", url="https://www.luogu.com.cn/article/example")
+
+    async def judge(prompt, **kwargs):
+        captured.append(json.loads(prompt))
+        payload = _passing_review_payload()
+        payload["checks"]["extra_tests"] = "UNKNOWN"
+        payload["extra_tests"] = []
+        return json.dumps(payload)
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-only")
+    monkeypatch.setattr(tutorials, "problem_reference", reference)
+    monkeypatch.setattr(submission, "_chat_for_submission", judge)
+    result = asyncio.run(submission.review_submission(
+        problem=problem, problem_statement="Cover n by m with a by a tiles.",
+        user_solution="两维向上取整相乘，因为两方向都必须覆盖且按网格铺可行。",
+    ))
+    assert result.accepted
+    assert captured[0]["tutorial"]["content"].startswith("洛谷缓存")
+
+
 def test_extract_json_object_accepts_fenced_and_noisy_response() -> None:
     fenced = submission._extract_json_object('```json\n{"verdict":"ACCEPTED"}\n```')
     noisy = submission._extract_json_object('前缀说明\n{"verdict":"WRONG_ANSWER","score":0.2}\n后缀')

@@ -1,6 +1,7 @@
 from nonebot import on_command, on_message
 from nonebot.adapters.onebot.v11 import Bot, Event, GroupMessageEvent, Message, MessageEvent
 from nonebot.params import CommandArg
+from nonebot.log import logger
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
@@ -17,6 +18,7 @@ from bot.services.group_config import (
 from bot.services.problem_random import difficulty_usage
 from bot.services.help_text import admin_help_text, group_help_text
 from bot.services.permissions import is_group_admin, is_superuser
+from bot.services.ping import ping_image
 
 
 __plugin_meta__ = PluginMetadata(
@@ -81,7 +83,19 @@ async def handle_help(bot: Bot, event: Event) -> None:
 async def handle_ping(event: Event) -> None:
     if not is_superuser(event) and not group_bot_enabled(group_id_from_event(event)):
         await ping_cmd.finish()
-    await ping_cmd.finish("pong")
+    try:
+        image = ping_image()
+    except (ValueError, OSError) as exc:
+        logger.warning(f"Cannot load /ping image ({type(exc).__name__}); sending pong")
+        await ping_cmd.finish("pong")
+    if image is None:
+        await ping_cmd.finish("pong")
+    try:
+        await ping_cmd.send(Message(image))
+    except Exception as exc:
+        logger.warning(f"Cannot send /ping image ({type(exc).__name__}); sending pong")
+        await ping_cmd.finish("pong")
+    await ping_cmd.finish()
 
 
 @init_cmd.handle()
@@ -113,6 +127,6 @@ async def handle_config(event: Event) -> None:
 def _init_usage() -> str:
     return (
         "用法：/init <algo:enable|disable> <rank:self|all> <giveup:count> "
-        "<emoji:enable|disable> <search:enable|disable>\n"
-        "例如：/init algo:enable rank:self giveup:2 emoji:disable search:disable"
+        "<emoji:enable|disable>\n"
+        "例如：/init algo:enable rank:self giveup:2 emoji:disable"
     )
