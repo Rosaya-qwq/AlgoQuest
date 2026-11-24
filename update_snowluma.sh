@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 REPOSITORY="SnowLuma/SnowLuma"
+FALLBACK_API_BASE="https://git.hoshizukimio.com/api/v1/repos/HoshizukiMio/SnowLuma"
 INSTALL_DIR="${SNOWLUMA_DIR:-/opt/SnowLuma}"
 SERVICE_NAME="${SNOWLUMA_SERVICE:-snowluma.service}"
 BACKUP_DIR="${SNOWLUMA_BACKUP_DIR:-}"
@@ -153,10 +154,19 @@ CURL_PROXY_ARGS=()
 if [[ -n "$DOWNLOAD_PROXY" ]]; then
     CURL_PROXY_ARGS=(--proxy "$DOWNLOAD_PROXY")
 fi
-curl -fsSL --retry 3 --retry-delay 2 "${CURL_PROXY_ARGS[@]}" \
+if ! curl -fsSL --connect-timeout 15 --max-time 90 --retry 1 --retry-delay 2 "${CURL_PROXY_ARGS[@]}" \
     -H 'Accept: application/vnd.github+json' \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
-    "$API_URL" -o "$RELEASE_JSON"
+    "$API_URL" -o "$RELEASE_JSON"; then
+    if [[ -n "$REQUESTED_VERSION" ]]; then
+        API_URL="$FALLBACK_API_BASE/releases/tags/$REQUESTED_VERSION"
+    else
+        API_URL="$FALLBACK_API_BASE/releases/latest"
+    fi
+    log "primary release source unavailable; using git.hoshizukimio.com/HoshizukiMio/SnowLuma"
+    curl -fsSL --connect-timeout 15 --max-time 90 --retry 2 --retry-delay 2 "${CURL_PROXY_ARGS[@]}" \
+        -H 'Accept: application/json' "$API_URL" -o "$RELEASE_JSON"
+fi
 
 PACKAGE_SUFFIX="linux-${RELEASE_ARCH}"
 if ((USE_LITE)); then
@@ -193,14 +203,33 @@ print(tag)
 print(asset["name"])
 print(asset["browser_download_url"])
 print(digest)
+checksum_asset = next((entry for entry in release.get("assets", []) if entry.get("name") == "checksums.sha256"), {})
+print(checksum_asset.get("browser_download_url") or "")
 PY
 )
 
-((${#RELEASE_INFO[@]} == 4)) || die "failed to parse GitHub release metadata"
+((${#RELEASE_INFO[@]} == 5)) || die "failed to parse release metadata"
 LATEST_VERSION="${RELEASE_INFO[0]}"
 ASSET_NAME="${RELEASE_INFO[1]}"
 DOWNLOAD_URL="${RELEASE_INFO[2]}"
 EXPECTED_SHA256="${RELEASE_INFO[3]}"
+CHECKSUM_URL="${RELEASE_INFO[4]}"
+if [[ -z "$EXPECTED_SHA256" && -n "$CHECKSUM_URL" ]]; then
+    curl -fsSL --connect-timeout 15 --max-time 90 "${CURL_PROXY_ARGS[@]}" "$CHECKSUM_URL" -o "$TEMP_DIR/checksums.sha256"
+    EXPECTED_SHA256="$(python3 - "$TEMP_DIR/checksums.sha256" "$ASSET_NAME" <<'PY'
+import pathlib
+import re
+import sys
+for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    match = re.fullmatch(r"([a-fA-F0-9]{64})\s+\*?(.+)", line.strip())
+    if match and match.group(2) == sys.argv[2]:
+        print(match.group(1).lower())
+        break
+else:
+    raise SystemExit("selected package is missing from checksums.sha256")
+PY
+)"
+fi
 
 installed_version="unknown"
 if [[ -f "$INSTALL_DIR/.algoquest-snowluma-version" ]]; then

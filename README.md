@@ -2,6 +2,8 @@
 
 基于 NoneBot2 + SnowLuma 的 QQ 机器人项目。提供 Codeforces / AtCoder 随机算法题与判题功能。
 
+部署入口：[Windows / Linux 一键部署](#一键部署windows--linux)。
+
 ## 作者
 
 <table>
@@ -931,7 +933,145 @@ sudo sysctl --system
 - NoneBot2 控制台是否有收到事件日志。
 - 命令前缀是否是 `/`，当前只配置了斜杠命令。
 
-## 远程服务器部署手册
+## 一键部署（Windows / Linux）
+
+仓库根目录提供 `deploy.sh` 和 `deploy.ps1`。脚本从当前项目目录安装，不会自动拉取 Git，也不会覆盖现有 `.env`；重新部署前先同步代码与 `source/`。首次需要在 `.env` 中填写真实 `SUPERUSERS` 和 `DEEPSEEK_API_KEY`。不存在 `.env` 时脚本会从示例创建，并明确提示要补齐的配置，不会把密钥或 Cookie 打到安装日志中。
+
+安装过程按 **11 个步骤实时输出进度**，包括系统依赖、Python 环境、pip 安装、Chromium 下载、渲染检查、SnowLuma、托管配置和启动。默认完成后继续跟随 Bot 与 SnowLuma 日志，可直接看到题库下载、翻译、预热与 QQ 连接情况；按 `Ctrl+C` 结束看日志，后台托管仍会运行。安装日志另存到 `logs/deploy-*.log`。
+
+### SnowLuma 下载源与首次登录
+
+先尝试 `https://github.com/SnowLuma/SnowLuma`，不可用时自动切换到指定备用源：
+
+```text
+https://git.hoshizukimio.com/HoshizukiMio/SnowLuma
+```
+
+安装器显示实际选用的来源、平台和文件名；有 SHA-256 摘要或 `checksums.sha256` 时校验下载内容。2026-11-24 已核对备用源可提供 v2.4.2 的 Windows x64、Linux x64/arm64 完整包。也可传入已有完整安装包。**已有目录中存在 launcher 时直接复用，不覆盖 SnowLuma 的登录状态和配置。** 后续版本升级可使用下面的独立更新方式。
+
+默认 SnowLuma 放在项目 `.snowluma/`；Linux 若已有 `/opt/SnowLuma/launcher.sh` 则优先复用 `/opt/SnowLuma`。可通过参数指定实际目录。QQ 客户端需事先安装，QQ 登录、协议确认和 OneBot 配置在 WebUI 中完成，脚本不代替用户自动同意 SnowLuma 协议。
+
+安装/复用 SnowLuma 后会直接显示登录地址，默认：
+
+```text
+http://127.0.0.1:5099/
+```
+
+初始账号为 `admin`，初始密码见当次 SnowLuma 启动日志。远程服务器同时显示 SSH 隧道命令，例如在自己的电脑上运行：
+
+```bash
+ssh -L 5099:127.0.0.1:5099 ubuntu@服务器IP
+```
+
+保持隧道连接，再打开上面的本机链接。已有 `config/webui.json` 的端口配置会用于生成链接；也可通过 `--webui-port` / `-WebUiPort` 指定显示端口，最终以 SnowLuma 启动日志为准。SSH 非 22 端口时在命令中补上 `-p 端口`。脚本不会自动向公网开放 WebUI。
+
+### Linux：Ubuntu 22.04+ / Debian 12+ 与 systemd
+
+在准备运行 QQ 的普通用户下，将代码放到该用户可访问的位置，填写 `.env` 后运行：
+
+```bash
+cd ~/AlgoQuest
+bash deploy.sh --ssh-target ubuntu@服务器IP
+```
+
+系统安装和服务管理阶段会使用 sudo。Bot 和 SnowLuma 分别托管为 `algoquest.service` 与 `snowluma.service`，支持开机启动与异常重启；SnowLuma 服务具有 QQ 接入所需的 `CAP_SYS_PTRACE`。**服务用户应与 QQ 进程用户一致。** 默认使用当前调用用户或 `SUDO_USER`；从 root 部署时可显式选择：
+
+```bash
+sudo bash deploy.sh --user ubuntu --snowluma-dir /opt/SnowLuma --ssh-target ubuntu@服务器IP
+```
+
+项目放在 `/root/` 时，普通服务用户一般无法读取，应先放到 `/opt/AlgoQuest` 等可访问目录。已有完整安装包可这样部署：
+
+```bash
+bash deploy.sh --snowluma-archive /path/to/SnowLuma-v2.4.2-linux-x64.tar.gz
+```
+
+如果只想重新部署 Bot、继续由原方式运行 SnowLuma：
+
+```bash
+bash deploy.sh --bot-only
+```
+
+常用参数：`--python /path/to/python3`、`--service 名称`、`--snowluma-service 名称`、`--no-follow`、`--no-start`、`--skip-system-deps`。`--plan` 仅显示计划，不修改文件、安装包或服务。
+
+安装后查看状态和日志：
+
+```bash
+sudo systemctl status algoquest snowluma --no-pager
+sudo journalctl -u algoquest -u snowluma -f
+```
+
+### Windows：Windows 服务 + SnowLuma 登录任务
+
+将项目克隆/复制到本机磁盘，例如 `D:\AlgoQuest`，不要直接从 WSL/网络共享路径安装 Windows 服务。在 **管理员 PowerShell** 中运行：
+
+```powershell
+cd D:\AlgoQuest
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy.ps1
+```
+
+脚本优先使用现有 64 位 Python 3.10+；缺少 Python 时通过 winget 安装 Python 3.12。无 winget 的 Windows Server 需先安装 64 位 Python，或通过 `-PythonPath C:\Python312\python.exe` 指定已有解释器。
+
+Bot 使用 **WinSW Windows 服务**托管，服务名默认 `algoquest`，自动启动并在异常时重启。WinSW 2.12.0 从官方 GitHub Release 下载到 `.service/`，默认按 LocalSystem 运行；Chromium 固定安装在项目 `.playwright-browsers/`，避免交互用户与服务账户使用不同的浏览器缓存。
+
+SnowLuma 使用 **当前 Windows 用户的交互式计划任务**，任务名默认 `algoquest-snowluma`，登录后隐藏运行、退出后重新启动。这样它能接入同一用户会话中的 QQ，避免 Windows 服务 Session 0 隔离导致收不到 QQ 消息。QQ 和该用户会话仍需在线；Windows Bot 服务本身不依赖用户登录。
+
+复用现有 SnowLuma 或使用本地完整包：
+
+```powershell
+.\deploy.ps1 -SnowLumaDir C:\SnowLuma
+.\deploy.ps1 -SnowLumaArchive C:\Downloads\SnowLuma-v2.4.2-win-x64.zip
+```
+
+常用参数：`-BotOnly`、`-NoFollow`、`-NoStart`、`-ServiceName 名称`、`-WebUiPort 5099`、`-SshTarget user@服务器IP`。`-Plan` 只显示计划。直接运行 `.ps1` 遇到执行策略限制时，使用上面的 `powershell.exe -ExecutionPolicy Bypass -File ...` 命令，对当前进程生效即可。
+
+查看状态：
+
+```powershell
+Get-Service algoquest
+Get-ScheduledTask -TaskName algoquest-snowluma
+Get-Content .\logs\algoquest.out.log -Tail 60 -Wait
+```
+
+Bot 的 stdout/stderr、WinSW wrapper 日志和 SnowLuma 的分次启动日志都在 `logs/`。默认安装器会同时跟随两个程序的日志，方便查看首次 WebUI 密码。
+
+### 干净重部署与卸载托管
+
+普通部署保留运行数据。明确要清空当前项目 `data/`、重建 Python 环境时：
+
+```bash
+bash deploy.sh --reset-data --rebuild-venv
+```
+
+```powershell
+.\deploy.ps1 -ResetData -RebuildVenv
+```
+
+重置前会先停止对应 Bot 服务；清理只允许项目根目录下的真实 `data/` 或 `.venv/`。`ALGOQUEST_DATA_DIR` 指到外部目录，或目录被重定向时会拒绝自动清理，以免删除别处的数据。**`--reset-data` / `-ResetData` 会删除榜单、群配置、黑名单、收藏、表情绑定及所有缓存，不生成备份。** `.env` 和 `source/` 保留。
+
+卸载这两个脚本管理的服务/计划任务，保留项目文件、登录状态、配置与数据：
+
+```bash
+bash deploy.sh --uninstall
+```
+
+```powershell
+.\deploy.ps1 -Uninstall
+```
+
+附加 `--bot-only` / `-BotOnly` 则只卸载 Bot 托管。卸载不会删除整个项目目录或 SnowLuma 安装目录。服务名对应其他项目目录时会拒绝覆盖，先指定正确的名称与目录。
+
+### 数据实际保存位置
+
+- 当前 Bot 业务数据集中在 `ALGOQUEST_DATA_DIR`，默认项目 `data/`：包括榜单、群配置、黑名单、表情绑定、收藏数据库、题库、题面/题解/配图与 MathJax 缓存。
+- `.env` 保存个人设置、API Key、Cookie；`source/` 保存个人 `/ping` 图片，两者独立于 `data/`。
+- SnowLuma/QQ 的登录状态、消息数据库、配置在各自安装/用户目录；清空 Bot 的 `data/` 不会注销 QQ 或清空它们。
+- `.venv/`、`.playwright-browsers/`、`.service/` 属于安装文件；`logs/` 与系统 journal、`__pycache__/`、`.pytest_cache/` 等也在 `data/` 之外。
+- 旧版本可能遗留根目录 `guild1.db`、`guild1.db-wal`、`guild1.db-shm`；当前代码不读取这些文件，本次本地清理已移除它们。
+
+托管状态 `Running/active` 仅表示进程已启动。首次全新数据会开始抓题、翻译和预热；等日志出现 `Problem startup ensure finished`，再确认 SnowLuma 的 QQ 与反向 WebSocket 已连通。
+
+## 远程服务器部署手册（手工步骤与排错）
 
 ### 1. 服务器基础环境
 
@@ -1284,7 +1424,7 @@ journalctl -u snowluma -f
 
 ### 10. 使用脚本更新 SnowLuma
 
-项目根目录提供了 `update_snowluma.sh`。脚本会自动读取 GitHub 最新正式版、识别 `x86_64` / `arm64`、下载对应的 Linux 完整版并校验 GitHub Release 提供的 SHA-256。更新前会创建完整备份，保留配置、登录状态、日志和数据库；如果新服务无法启动，会自动回滚。
+项目根目录提供了 `update_snowluma.sh`。脚本会先读取 GitHub 最新正式版，主源不可用时自动使用上面指定的 `git.hoshizukimio.com/HoshizukiMio/SnowLuma` 备用源；识别 `x86_64` / `arm64`，下载对应的 Linux 完整版，并使用 Release 摘要或 `checksums.sha256` 校验。更新前会创建完整备份，保留配置、登录状态、日志和数据库；如果新服务无法启动，会自动回滚。
 
 先把脚本随项目同步到服务器，然后赋予执行权限：
 

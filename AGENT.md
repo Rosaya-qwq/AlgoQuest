@@ -47,6 +47,15 @@
 - `bot/services/ping.py`：读取同组 `ALGOQUEST_PING_IMAGE_ENABLED/PATH/SUMMARY`，个人图片在 `source/ping.png`，不放进服务器运行数据目录。示例默认关闭，个人 `.env` 可开启。
 - 改动以上功能后运行 `tests/test_stars.py`、`tests/test_emoji_rename.py`、`tests/test_ping.py`、`tests/test_personal_commands.py`。
 
+### 一键部署
+
+- `deploy.sh`：Ubuntu/Debian + systemd，托管 Bot/SnowLuma、实时安装输出与 journal；支持只看计划、复用 SnowLuma、明确重置项目 data/venv、卸载托管。
+- `deploy.ps1`：Windows WinSW Bot 服务 + 与 QQ 同会话的 SnowLuma 登录计划任务，实时跟随两个程序日志。不能将 QQ bridge 改成 Session 0 服务。
+- `scripts/deploy_support.py`：不输出密钥的配置检查、systemd/WinSW 模板、浏览器检查、限定范围的重置。
+- `scripts/snowluma_support.py`：官方源失败后使用指定备用 `https://git.hoshizukimio.com/HoshizukiMio/SnowLuma`，完整包选择、SHA-256 校验、安全解包、复用登录目录、WebUI/SSH 链接。
+- 安装脚本默认保留 .env、data、source、SnowLuma 登录状态；仅显式 reset 选项可删除项目 data/venv。未运行真实安装时应说明只验证了语法/计划/模板，不能声称已在本机安装服务。
+- 改脚本后运行 `tests/test_deployment.py`、`bash -n deploy.sh` 和 PowerShell 解析器检查，避免在开发机安装或停止真实服务来做测试。
+
 ## 改动约定
 
 - 新功能优先放 `bot/plugins/`，业务逻辑放 `bot/services/`。
